@@ -563,3 +563,16 @@ fn malformed_runtime_state_cannot_fail_a_hook() {
         .expect("write input");
     assert!(child.wait().expect("wait").success());
 }
+
+#[test]
+fn old_git_setup_makes_no_global_hook_changes() {
+    if supported_named_hooks() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    let output = sandbox.tool(None, &["setup"]);
+    assert!(output.status.success());
+    let message = String::from_utf8_lossy(&output.stdout);
+    assert!(message.contains("GitSama needs Git 2.54 or newer"));
+    assert!(!sandbox.global_config.exists());
+}

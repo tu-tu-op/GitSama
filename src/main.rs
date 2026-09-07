@@ -10,6 +10,7 @@ mod logging;
 mod packs;
 mod paths;
 mod platform;
+mod push;
 mod state;
 
 fn main() {
@@ -29,4 +30,3 @@ fn main() {
 
     std::process::exit(code);
 }
-

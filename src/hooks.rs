@@ -65,16 +65,22 @@ pub fn install_global(binary: &Path) -> Result<()> {
         set_global(&format!("{name}.event"), hook.native_event, true)?;
         set_global(
             &format!("{name}.command"),
-            &format!(
-                "{} hook {}",
-                platform::shell_quote(&binary),
-                hook.native_event
-            ),
+            &hook_command(&binary, hook.native_event),
             false,
         )?;
         set_global(&format!("{name}.enabled"), "true", false)?;
     }
     Ok(())
+}
+
+fn hook_command(binary: &Path, native_event: &str) -> String {
+    // Git appends its arguments to the shell command. Forward them explicitly
+    // before the guard; any appended arguments to ':' are harmless. The guard
+    // also covers failures that happen before our Rust handler can start.
+    format!(
+        "GITSAMA_GIT_PID=\"$PPID\" {} hook {native_event} \"$@\" >/dev/null 2>&1 || :",
+        platform::shell_quote(binary)
+    )
 }
 
 pub fn remove_global() -> Result<()> {

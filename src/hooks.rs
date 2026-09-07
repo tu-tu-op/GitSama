@@ -78,7 +78,7 @@ fn hook_command(binary: &Path, native_event: &str) -> String {
     // before the guard; any appended arguments to ':' are harmless. The guard
     // also covers failures that happen before our Rust handler can start.
     format!(
-        "{} hook {native_event} \"$@\" >/dev/null 2>&1 || :",
+        "GITSAMA_GIT_PID=\"$PPID\" {} hook {native_event} \"$@\" >/dev/null 2>&1 || :",
         platform::shell_quote(binary)
     )
 }
@@ -147,9 +147,17 @@ pub fn list_native_hook(native_event: &str) -> Result<String> {
     }
 }
 
-const BRANCH_DEDUP_MAX_AGE_MS: u64 = 1_500;
+const BRANCH_DEDUP_MAX_AGE_MS: u64 = 5_000;
 const BRANCH_DEDUP_DELAY_MS: u64 = 180;
-const BRANCH_RECENT_AGE_MS: u64 = 500;
+const BRANCH_RECENT_AGE_MS: u64 = 5_000;
+
+fn branch_operation_identity() -> Result<String> {
+    let repository = git::repository_identity()?;
+    Ok(match platform::hook_git_pid() {
+        Some(pid) => format!("{repository}#gitsama-git-{pid}"),
+        None => repository,
+    })
+}
 
 pub fn run_fail_open(native_event: &str, args: &[String]) -> Result<()> {
     let paths = AppPaths::discover().ok();
@@ -286,7 +294,7 @@ fn handle_checkout(paths: &AppPaths, config: &Config, args: &[String]) -> Result
         Ok(branch) if !branch.is_empty() => branch,
         _ => return Ok(()),
     };
-    let repository = git::repository_identity()?;
+    let repository = branch_operation_identity()?;
     if config.is_event_enabled(EventKind::BranchCreate) {
         if let Some(pending) =
             state::take_pending(paths, &repository, &branch, BRANCH_DEDUP_MAX_AGE_MS)?
@@ -324,7 +332,13 @@ fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Res
     std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|error| Error::Git(format!("could not read reference transaction: {error}")))?;
-    let repository = git::repository_identity()?;
+    if !input
+        .lines()
+        .any(|line| parse_transaction_line(line).is_some())
+    {
+        return Ok(());
+    }
+    let repository = branch_operation_identity()?;
     // A first commit materializes the unborn HEAD branch. Git reports it as
     // a ref creation too, but post-commit already represents that action.
     // During switch -c / checkout -b, HEAD still names the previous branch
@@ -406,12 +420,15 @@ fn run_pending(repository: &str, branch: &str) -> Result<()> {
     thread::sleep(Duration::from_millis(BRANCH_DEDUP_DELAY_MS));
     let paths = AppPaths::discover()?;
     let config = Config::load_or_default(&paths);
+    // Publish the suppression marker before claiming pending work. Checkout
+    // must see either the pending event or this marker, never a gap between.
+    state::mark_recent(&paths, repository, branch, BRANCH_RECENT_AGE_MS)?;
     let Some(pending) = state::take_pending(&paths, repository, branch, BRANCH_DEDUP_MAX_AGE_MS)?
     else {
+        state::clear_recent(&paths, repository, branch);
         return Ok(());
     };
-    state::mark_recent(&paths, repository, &pending.branch, BRANCH_RECENT_AGE_MS)?;
-    dispatch(
+    let result = dispatch(
         &paths,
         &config,
         EventKind::BranchCreate,
@@ -419,7 +436,12 @@ fn run_pending(repository: &str, branch: &str) -> Result<()> {
             branch: Some(pending.branch.clone()),
             commit_count: None,
         },
-    )
+    );
+    // This worker is already detached. Expire its marker without a daemon or
+    // unbounded accumulation of per-invocation state files.
+    thread::sleep(Duration::from_millis(BRANCH_RECENT_AGE_MS));
+    state::clear_recent(&paths, repository, branch);
+    result
 }
 
 fn set_global(key: &str, value: &str, append: bool) -> Result<()> {

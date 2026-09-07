@@ -32,6 +32,71 @@ pub fn shell_quote(path: &Path) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// Identify the Git invocation behind our configured shell command. A shell
+/// remains between Git and GitSama because the command ends in a failure guard.
+pub fn hook_git_pid() -> Option<u32> {
+    let parent = std::env::var("GITSAMA_GIT_PID").ok()?;
+    #[cfg(not(windows))]
+    {
+        parent.parse().ok().filter(|pid| *pid > 1)
+    }
+    #[cfg(windows)]
+    {
+        // MSYS reports PPID=1 for a native Windows parent. Read the native
+        // process tree instead; no process arguments are read or logged.
+        let _ = parent;
+        windows_git_parent()
+    }
+}
+
+#[cfg(windows)]
+fn windows_git_parent() -> Option<u32> {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+            TH32CS_SNAPPROCESS,
+        },
+    };
+
+    // SAFETY: These calls use a checked snapshot handle and a correctly sized
+    // initialized output structure. The handle is closed before returning.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut parents = Vec::new();
+        let mut found = Process32FirstW(snapshot, &mut entry);
+        while found != 0 {
+            let end = entry
+                .szExeFile
+                .iter()
+                .position(|ch| *ch == 0)
+                .unwrap_or(entry.szExeFile.len());
+            let is_git =
+                String::from_utf16_lossy(&entry.szExeFile[..end]).eq_ignore_ascii_case("git.exe");
+            parents.push((entry.th32ProcessID, entry.th32ParentProcessID, is_git));
+            found = Process32NextW(snapshot, &mut entry);
+        }
+        CloseHandle(snapshot);
+        // MSYS may insert more than one shell process while emulating fork.
+        let mut pid = std::process::id();
+        for _ in 0..16 {
+            let (_, parent, is_git) = parents.iter().find(|(id, _, _)| *id == pid)?;
+            if *is_git {
+                return Some(pid);
+            }
+            pid = *parent;
+        }
+        None
+    }
+}
+
 #[cfg(windows)]
 pub fn path_separator() -> char {
     ';'

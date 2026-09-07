@@ -86,6 +86,10 @@ pub fn take_recent(paths: &AppPaths, repository: &str, branch: &str) -> Result<b
     Ok(result)
 }
 
+pub fn clear_recent(paths: &AppPaths, repository: &str, branch: &str) {
+    let _ = fs::remove_file(recent_path(paths, repository, branch));
+}
+
 pub fn pending_path(paths: &AppPaths, repository: &str, branch: &str) -> PathBuf {
     paths.state.join(format!(
         "pending-{}.json",

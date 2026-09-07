@@ -39,7 +39,11 @@ impl Sandbox {
     }
 
     fn tool(&self, directory: Option<&Path>, args: &[&str]) -> Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_gitsama"));
+        self.tool_path(Path::new(env!("CARGO_BIN_EXE_gitsama")), directory, args)
+    }
+
+    fn tool_path(&self, executable: &Path, directory: Option<&Path>, args: &[&str]) -> Output {
+        let mut command = Command::new(executable);
         command.args(args);
         self.apply_env(&mut command);
         if let Some(directory) = directory {
@@ -389,3 +393,48 @@ fn repository_opt_out_is_local_only() {
     assert_eq!(sandbox.event_names(), vec!["commit"]);
 }
 
+#[test]
+fn traditional_repository_hooks_still_run() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("coexistence-repo");
+    let marker = sandbox._directory.path().join("traditional-hook-ran");
+    let hook = repo.join(".git/hooks/post-commit");
+    let script = format!(
+        "#!/bin/sh\nprintf existing >> '{}'\n",
+        marker.to_string_lossy()
+    );
+    fs::write(&hook, script).expect("traditional hook");
+    sandbox.commit(&repo, "coexistence");
+    assert!(marker.exists());
+    assert_eq!(sandbox.event_names(), vec!["commit"]);
+}
+
+#[test]
+fn configured_hook_commands_work_from_a_path_with_spaces() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    let spaced = sandbox._directory.path().join("Git Sama Test").join("bin");
+    fs::create_dir_all(&spaced).expect("spaced binary directory");
+    let binary_name = if cfg!(windows) { "gitsama.exe" } else { "gitsama" };
+    let binary = spaced.join(binary_name);
+    fs::copy(env!("CARGO_BIN_EXE_gitsama"), &binary).expect("copy binary");
+    let setup = sandbox.tool_path(&binary, None, &["setup"]);
+    assert!(setup.status.success(), "spaced setup failed");
+
+    let config = sandbox.git(
+        None,
+        &["config", "--global", "--get", "hook.gitsama-post-commit.command"],
+    );
+    let command = String::from_utf8_lossy(&config.stdout);
+    assert!(command.contains("Git Sama Test"));
+
+    let repo = sandbox.init_repo("spaced-hook-repo");
+    sandbox.commit(&repo, "spaced path");
+    assert_eq!(sandbox.event_names(), vec!["commit"]);
+}

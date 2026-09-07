@@ -14,7 +14,7 @@ mod push;
 mod state;
 
 fn main() {
-    let result = std::panic::catch_unwind(|| cli::run());
+    let result = std::panic::catch_unwind(cli::run);
 
     let code = match result {
         Ok(Ok(())) => 0,

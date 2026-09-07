@@ -254,11 +254,16 @@ fn status() -> Result<()> {
         .iter()
         .filter(|hook| hooks::global_is_registered(**hook))
         .count();
+    let globally_disabled = hooks::HOOKS
+        .iter()
+        .any(|hook| !hooks::global_is_enabled(*hook));
 
     let state = if local_disabled {
         "disabled in this repository"
-    } else if !config.enabled {
+    } else if !config.enabled || globally_disabled {
         "muted"
+    } else if global_hooks != hooks::HOOKS.len() {
+        "not set up"
     } else {
         "globally enabled"
     };
@@ -549,23 +554,32 @@ fn uninstall(keep_data: bool) -> Result<()> {
     hooks::remove_global()?;
     let _ = platform::remove_user_path_entry(&paths.bin);
     let executable = env::current_exe().ok();
+    let managed_executable = platform::installed_binary(&paths);
     let root_is_executable = executable.as_ref().is_some_and(|executable| {
-        let root = paths.root.canonicalize().unwrap_or_else(|_| paths.root.clone());
+        let root = paths
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| paths.root.clone());
         let executable = executable
             .canonicalize()
             .unwrap_or_else(|_| executable.clone());
         executable.starts_with(root)
     });
     if let Some(executable) = executable.filter(|_| root_is_executable) {
-        platform::schedule_cleanup(
-            &executable,
-            (!keep_data).then_some(paths.root.as_path()),
-        )?;
-    } else if !keep_data && paths.root.exists() {
-        std::fs::remove_dir_all(&paths.root).map_err(|source| Error::WriteFile {
-            path: paths.root.clone(),
-            source,
-        })?;
+        platform::schedule_cleanup(&executable, (!keep_data).then_some(paths.root.as_path()))?;
+    } else {
+        if managed_executable.exists() {
+            std::fs::remove_file(&managed_executable).map_err(|source| Error::WriteFile {
+                path: managed_executable.clone(),
+                source,
+            })?;
+        }
+        if !keep_data && paths.root.exists() {
+            std::fs::remove_dir_all(&paths.root).map_err(|source| Error::WriteFile {
+                path: paths.root.clone(),
+                source,
+            })?;
+        }
     }
     println!("✓ GitSama hooks removed.");
     if keep_data {

@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::fs;
 
 use serde::{Deserialize, Serialize};
 
@@ -136,10 +136,6 @@ impl Config {
 
     pub fn set_event_enabled(&mut self, event: EventKind, enabled: bool) {
         self.events.set_enabled(event, enabled);
-    }
-
-    pub fn path_exists(&self, path: &Path) -> bool {
-        path.exists()
     }
 }
 

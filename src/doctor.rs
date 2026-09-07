@@ -95,6 +95,16 @@ pub fn run(fix: bool) -> Result<()> {
         for hook in hooks::HOOKS {
             if hooks::global_is_registered(hook) {
                 ok(&format!("{} registered globally", hook.native_event));
+                match hooks::list_native_hook(hook.native_event) {
+                    Ok(_) => ok(&format!(
+                        "{} is visible to Git's hook runner",
+                        hook.native_event
+                    )),
+                    Err(error) => warn(&format!(
+                        "{} could not be listed by Git: {error}",
+                        hook.native_event
+                    )),
+                }
                 registered += 1;
             } else {
                 warn(&format!("{} is not registered globally", hook.native_event));

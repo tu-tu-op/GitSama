@@ -100,10 +100,7 @@ pub fn classify(refs: &[PushRef], remote_name: &str, threshold: u32) -> Result<P
         }
     }
 
-    Ok(PushClassification {
-        event: EventKind::Push,
-        commit_count: seen.len() as u64,
-    })
+    Ok(classify_count(seen.len() as u64, threshold))
 }
 
 pub fn classify_count(commit_count: u64, threshold: u32) -> PushClassification {

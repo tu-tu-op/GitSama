@@ -60,10 +60,6 @@ impl EventKind {
         Self::from_str(&normalized)
             .map_err(|_| Error::message(format!("unknown GitSama event '{value}'")))
     }
-
-    pub const fn is_push(self) -> bool {
-        matches!(self, Self::Push | Self::MassivePush)
-    }
 }
 
 impl fmt::Display for EventKind {

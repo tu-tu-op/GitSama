@@ -145,24 +145,6 @@ where
     }
 }
 
-pub fn checked_in<I, S>(directory: &Path, args: I) -> Result<String>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let output = run_in(Some(directory), args)?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        let detail = output.stderr.trim();
-        Err(Error::Git(if detail.is_empty() {
-            format!("Git exited with {}", output.status)
-        } else {
-            detail.to_owned()
-        }))
-    }
-}
-
 pub fn repository_root() -> Result<PathBuf> {
     let root = checked(["rev-parse", "--show-toplevel"])?;
     Ok(PathBuf::from(root.trim()))

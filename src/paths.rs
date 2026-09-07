@@ -1,7 +1,4 @@
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
+use std::{env, fs, path::PathBuf};
 
 use crate::error::{Error, Result};
 
@@ -50,9 +47,5 @@ impl AppPaths {
             })?;
         }
         Ok(())
-    }
-
-    pub fn contains(&self, path: &Path) -> bool {
-        path.starts_with(&self.root)
     }
 }

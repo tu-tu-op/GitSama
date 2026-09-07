@@ -103,7 +103,7 @@ pub fn global_is_enabled(hook: HookSpec) -> bool {
     git::config_value("--global", &key)
         .ok()
         .flatten()
-        .map_or(true, |value| value != "false")
+        .is_none_or(|value| value != "false")
 }
 
 pub fn local_is_disabled(hook: HookSpec) -> bool {
@@ -140,24 +140,6 @@ pub fn list_native_hook(native_event: &str) -> Result<String> {
         Ok(output.stdout)
     } else {
         Err(Error::Git(output.stderr.trim().to_owned()))
-    }
-}
-
-pub fn spec_for_native(native_event: &str) -> Option<HookSpec> {
-    HOOKS
-        .iter()
-        .copied()
-        .find(|hook| hook.native_event == native_event)
-}
-
-pub fn native_for_event(event: EventKind) -> &'static str {
-    match event {
-        EventKind::Commit => "post-commit",
-        EventKind::Push | EventKind::MassivePush => "pre-push",
-        EventKind::Merge => "post-merge",
-        EventKind::BranchSwitch => "post-checkout",
-        EventKind::BranchCreate | EventKind::BranchDelete => "reference-transaction",
-        EventKind::Rebase => "post-rewrite",
     }
 }
 
@@ -482,8 +464,8 @@ fn unset_scope(scope: &str, key: &str) -> Result<()> {
 mod tests {
     use std::path::Path;
 
-    use super::{HOOKS, native_for_event};
-    use crate::{events::EventKind, platform::shell_quote};
+    use super::HOOKS;
+    use crate::platform::shell_quote;
 
     #[test]
     fn has_one_named_hook_for_each_native_event() {
@@ -492,16 +474,6 @@ mod tests {
             HOOKS
                 .iter()
                 .all(|hook| hook.friendly_name.starts_with("gitsama-"))
-        );
-    }
-
-    #[test]
-    fn event_mapping_is_explicit() {
-        assert_eq!(native_for_event(EventKind::Commit), "post-commit");
-        assert_eq!(native_for_event(EventKind::MassivePush), "pre-push");
-        assert_eq!(
-            native_for_event(EventKind::BranchCreate),
-            "reference-transaction"
         );
     }
 

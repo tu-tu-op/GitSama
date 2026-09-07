@@ -1,8 +1,10 @@
 use std::{
-    env, fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+
+#[cfg(not(windows))]
+use std::fs;
 
 use crate::error::{Error, Result};
 
@@ -23,12 +25,9 @@ pub fn shell_quote(path: &Path) -> String {
     }
 }
 
+#[cfg(windows)]
 pub fn path_separator() -> char {
-    if cfg!(windows) {
-        ';'
-    } else {
-        ':'
-    }
+    ';'
 }
 
 pub fn installed_binary(paths: &crate::paths::AppPaths) -> PathBuf {
@@ -51,7 +50,8 @@ pub fn schedule_cleanup(executable: &Path, data_root: Option<&Path>) -> Result<(
     {
         let executable = windows_cmd_quote(executable);
         let cleanup = data_root.map(windows_cmd_quote);
-        let mut command_text = String::from("cd /d \"%TEMP%\" >nul 2>nul & timeout /t 1 /nobreak >nul");
+        let mut command_text =
+            String::from("cd /d \"%TEMP%\" >nul 2>nul & timeout /t 1 /nobreak >nul");
         command_text.push_str(" & del /f /q ");
         command_text.push_str(&executable);
         if let Some(root) = cleanup {
@@ -118,7 +118,12 @@ fn remove_windows_path_entry(bin: &Path) -> Result<bool> {
         .filter(|entry| !entry.is_empty() && normalize_windows_path(Path::new(entry)) != wanted)
         .map(ToOwned::to_owned)
         .collect();
-    if entries.len() == value.split(path_separator()).filter(|entry| !entry.trim().is_empty()).count() {
+    if entries.len()
+        == value
+            .split(path_separator())
+            .filter(|entry| !entry.trim().is_empty())
+            .count()
+    {
         return Ok(false);
     }
 
@@ -179,9 +184,11 @@ fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
         let lines: Vec<&str> = text.lines().collect();
         let mut kept = Vec::new();
         let mut index = 0;
+        let mut profile_changed = false;
         while index < lines.len() {
             if lines[index].trim() == marker {
                 changed = true;
+                profile_changed = true;
                 index += 1;
                 if index < lines.len() && lines[index].contains(bin_text.as_ref()) {
                     index += 1;
@@ -191,7 +198,7 @@ fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
                 index += 1;
             }
         }
-        if changed {
+        if profile_changed {
             let mut output = kept.join("\n");
             if text.ends_with('\n') {
                 output.push('\n');
@@ -231,4 +238,3 @@ mod tests {
         }
     }
 }
-

@@ -33,9 +33,7 @@ impl Sandbox {
         let mut command = Command::new("git");
         command.args(args);
         self.apply_env(&mut command);
-        if let Some(directory) = directory {
-            command.current_dir(directory);
-        }
+        command.current_dir(directory.unwrap_or(self._directory.path()));
         command.output().expect("run git")
     }
 
@@ -47,15 +45,18 @@ impl Sandbox {
         let mut command = Command::new(executable);
         command.args(args);
         self.apply_env(&mut command);
-        if let Some(directory) = directory {
-            command.current_dir(directory);
-        }
+        command.current_dir(directory.unwrap_or(self._directory.path()));
         command.output().expect("run gitsama")
     }
 
     fn tool_with_input(&self, args: &[&str], input: &str) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_gitsama"));
-        command.args(args).stdin(std::process::Stdio::piped());
+        command
+            .args(args)
+            .current_dir(self._directory.path())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         self.apply_env(&mut command);
         let mut child = command.spawn().expect("spawn gitsama");
         child
@@ -72,12 +73,21 @@ impl Sandbox {
         command
             .env("GITSAMA_HOME", &self.home)
             .env("GITSAMA_TEST_MODE", "1")
+            .env("GITSAMA_NONINTERACTIVE", "1")
             .env("GITSAMA_TEST_LOG", &self.log)
             .env("GIT_CONFIG_GLOBAL", &self.global_config)
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_COUNT", "0")
+            .env_remove("GIT_CONFIG_PARAMETERS")
+            .env_remove("GIT_CONFIG")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_COMMON_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("HOME", root)
             .env("USERPROFILE", root)
+            .env("XDG_CONFIG_HOME", root.join("xdg"))
             .env("GIT_AUTHOR_NAME", "GitSama Test")
             .env("GIT_AUTHOR_EMAIL", "gitsama-test@example.invalid")
             .env("GIT_COMMITTER_NAME", "GitSama Test")

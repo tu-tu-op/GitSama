@@ -36,7 +36,7 @@ try {
         $cargo = Get-Command cargo -ErrorAction SilentlyContinue
         if ($cargo) {
             Write-Host "Building GitSama from source..."
-            & cargo build --release --manifest-path $manifestPath
+            & cargo build --locked --release --manifest-path $manifestPath
             if ($LASTEXITCODE -ne 0) {
                 throw "Cargo could not build GitSama."
             }

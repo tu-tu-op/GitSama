@@ -34,7 +34,7 @@ if [ -x "$SCRIPT_DIR/target/release/gitsama" ]; then
   SOURCE="$SCRIPT_DIR/target/release/gitsama"
 elif command -v cargo >/dev/null 2>&1; then
   echo "Building GitSama from source..."
-  cargo build --release --manifest-path "$SCRIPT_DIR/Cargo.toml"
+  cargo build --locked --release --manifest-path "$SCRIPT_DIR/Cargo.toml"
   SOURCE="$SCRIPT_DIR/target/release/gitsama"
 else
   OS_NAME=$(uname -s)

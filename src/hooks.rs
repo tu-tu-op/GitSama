@@ -101,7 +101,7 @@ pub fn global_is_enabled(hook: HookSpec) -> bool {
     git::config_value("--global", &key)
         .ok()
         .flatten()
-        .is_none_or(|value| value != "false")
+        .is_none_or(|value| !value.eq_ignore_ascii_case("false"))
 }
 
 pub fn local_is_disabled(hook: HookSpec) -> bool {
@@ -386,6 +386,7 @@ fn run_pending(repository: &str, branch: &str) -> Result<()> {
     else {
         return Ok(());
     };
+    state::mark_recent(&paths, repository, &pending.branch, BRANCH_RECENT_AGE_MS)?;
     dispatch(
         &paths,
         &config,
@@ -394,8 +395,7 @@ fn run_pending(repository: &str, branch: &str) -> Result<()> {
             branch: Some(pending.branch.clone()),
             commit_count: None,
         },
-    )?;
-    state::mark_recent(&paths, repository, &pending.branch, BRANCH_RECENT_AGE_MS)
+    )
 }
 
 fn set_global(key: &str, value: &str, append: bool) -> Result<()> {

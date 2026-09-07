@@ -19,7 +19,9 @@ fn main() {
     let code = match result {
         Ok(Ok(())) => 0,
         Ok(Err(error)) => {
-            eprintln!("GitSama: {error}");
+            if !matches!(error, crate::error::Error::UnsupportedGit(_)) {
+                eprintln!("GitSama: {error}");
+            }
             1
         }
         Err(_) => {

@@ -175,9 +175,16 @@ fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
     let marker = "# GitSama PATH";
     let bin_text = bin.to_string_lossy();
     let mut changed = false;
+    let profiles: Vec<PathBuf> = if let Some(profile) = std::env::var_os("GITSAMA_SHELL_PROFILE") {
+        vec![PathBuf::from(profile)]
+    } else {
+        [".profile", ".bashrc", ".zshrc"]
+            .into_iter()
+            .map(|profile| home.join(profile))
+            .collect()
+    };
 
-    for profile in [".profile", ".bashrc", ".zshrc"] {
-        let path = home.join(profile);
+    for path in profiles {
         let Ok(text) = fs::read_to_string(&path) else {
             continue;
         };

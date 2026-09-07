@@ -52,14 +52,25 @@ else
   TEMP_DIR=$(mktemp -d)
   trap 'rm -rf "$TEMP_DIR"' EXIT HUP INT TERM
   ARCHIVE="$TEMP_DIR/$ASSET"
+  CHECKSUM="$ARCHIVE.sha256"
   URL="https://github.com/$REPOSITORY/releases/download/v$VERSION/$ASSET"
   echo "Downloading $URL"
   if command -v curl >/dev/null 2>&1; then
     curl --fail --location --silent --show-error "$URL" --output "$ARCHIVE"
+    curl --fail --location --silent --show-error "$URL.sha256" --output "$CHECKSUM"
   elif command -v wget >/dev/null 2>&1; then
     wget --quiet --output-document "$ARCHIVE" "$URL"
+    wget --quiet --output-document "$CHECKSUM" "$URL.sha256"
   else
     echo "Install Rust/Cargo or install curl/wget to download the release." >&2
+    exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$TEMP_DIR" && sha256sum --check "$CHECKSUM")
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "$TEMP_DIR" && shasum -a 256 --check "$CHECKSUM")
+  else
+    echo "Cannot verify the release checksum; install sha256sum or shasum." >&2
     exit 1
   fi
   mkdir -p "$TEMP_DIR/unpacked"

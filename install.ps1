@@ -51,6 +51,13 @@ try {
             $url = "https://github.com/$repository/releases/download/v$version/$asset"
             Write-Host "Downloading $url"
             Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive
+            $checksumPath = "$archive.sha256"
+            Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256" -OutFile $checksumPath
+            $expectedHash = (Get-Content -LiteralPath $checksumPath).Trim().Split()[0]
+            $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash
+            if ($expectedHash -ine $actualHash) {
+                throw "The downloaded GitSama archive failed its SHA-256 checksum."
+            }
             Expand-Archive -LiteralPath $archive -DestinationPath $tempDirectory
             $source = Join-Path $tempDirectory "gitsama.exe"
         }
@@ -93,4 +100,3 @@ try {
         Remove-Item -LiteralPath $tempDirectory -Recurse -Force
     }
 }
-

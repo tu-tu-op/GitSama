@@ -72,6 +72,15 @@ impl Pack {
         }
 
         let manifest_path = root.join("pack.toml");
+        if fs::symlink_metadata(&manifest_path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(Error::Pack(format!(
+                "pack manifest cannot be a symlink: {}",
+                manifest_path.display()
+            )));
+        }
         let text = fs::read_to_string(&manifest_path).map_err(|source| Error::ReadFile {
             path: manifest_path,
             source,
@@ -139,6 +148,15 @@ pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
     }
 
     let audio = root.join("audio");
+    if fs::symlink_metadata(&audio)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(Error::Pack(format!(
+            "Starter audio directory cannot be a symlink: {}",
+            audio.display()
+        )));
+    }
     fs::create_dir_all(&audio).map_err(|source| Error::WriteFile {
         path: audio.clone(),
         source,
@@ -158,7 +176,17 @@ pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
     let mut events = BTreeMap::new();
     for (event, frequency, duration) in frequencies {
         let filename = format!("{}.wav", event.as_str().replace('_', "-"));
-        write_tone(&audio.join(&filename), frequency, duration)?;
+        let path = audio.join(&filename);
+        if fs::symlink_metadata(&path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(Error::Pack(format!(
+                "Starter audio file cannot be a symlink: {}",
+                path.display()
+            )));
+        }
+        write_tone(&path, frequency, duration)?;
         events.insert(event.as_str().to_owned(), vec![format!("audio/{filename}")]);
     }
 
@@ -273,6 +301,9 @@ pub fn find(paths: &AppPaths, id: &str) -> Result<Pack> {
 }
 
 pub fn scaffold(name: &str, parent: impl AsRef<Path>) -> Result<PathBuf> {
+    if name.trim().is_empty() {
+        return Err(Error::Pack("pack name cannot be empty".to_owned()));
+    }
     let id = slugify(name);
     let parent = parent.as_ref();
     let root = parent.join(&id);
@@ -366,7 +397,13 @@ fn validate_manifest(manifest: &PackManifest) -> Result<()> {
         }
     }
     for event in manifest.events.keys() {
-        EventKind::parse(event)?;
+        let parsed = EventKind::parse(event)?;
+        if event != parsed.as_str() {
+            return Err(Error::Pack(format!(
+                "event '{event}' must use the canonical name '{}'",
+                parsed.as_str()
+            )));
+        }
     }
     Ok(())
 }
@@ -574,6 +611,9 @@ mod tests {
         value.events.insert("status".to_owned(), vec![]);
         assert!(validate_manifest(&value).is_err());
         value.events.remove("status");
+        value.events.insert("branch-create".to_owned(), vec![]);
+        assert!(validate_manifest(&value).is_err());
+        value.events.remove("branch-create");
         value.schema_version = PACK_SCHEMA_VERSION + 1;
         assert!(validate_manifest(&value).is_err());
     }
@@ -602,6 +642,12 @@ mod tests {
             EventKind::parse("branch-create").expect("event"),
             EventKind::BranchCreate
         );
+    }
+
+    #[test]
+    fn scaffold_rejects_an_empty_name() {
+        let directory = tempfile::tempdir().expect("temp");
+        assert!(super::scaffold(" ", directory.path()).is_err());
     }
 
     #[test]

@@ -59,9 +59,9 @@ pub fn take_pending(
     }
 }
 
-pub fn mark_recent(paths: &AppPaths, branch: &str, age_ms: u64) -> Result<()> {
+pub fn mark_recent(paths: &AppPaths, repository: &str, branch: &str, age_ms: u64) -> Result<()> {
     paths.ensure_layout()?;
-    let path = recent_path(paths, branch);
+    let path = recent_path(paths, repository, branch);
     let recent = RecentBranch {
         branch: branch.to_owned(),
         expires_at_ms: logging::now_millis() + u128::from(age_ms),
@@ -71,8 +71,8 @@ pub fn mark_recent(paths: &AppPaths, branch: &str, age_ms: u64) -> Result<()> {
     fs::write(&path, text).map_err(|source| Error::WriteFile { path, source })
 }
 
-pub fn take_recent(paths: &AppPaths, branch: &str) -> Result<bool> {
-    let path = recent_path(paths, branch);
+pub fn take_recent(paths: &AppPaths, repository: &str, branch: &str) -> Result<bool> {
+    let path = recent_path(paths, repository, branch);
     let Some(claim) = claim_file(&path)? else {
         return Ok(false);
     };
@@ -93,10 +93,11 @@ pub fn pending_path(paths: &AppPaths, repository: &str, branch: &str) -> PathBuf
     ))
 }
 
-fn recent_path(paths: &AppPaths, branch: &str) -> PathBuf {
-    paths
-        .state
-        .join(format!("recent-{}.json", stable_key(branch)))
+fn recent_path(paths: &AppPaths, repository: &str, branch: &str) -> PathBuf {
+    paths.state.join(format!(
+        "recent-{}.json",
+        stable_key(&format!("{repository}\0{branch}"))
+    ))
 }
 
 fn claim_file(path: &PathBuf) -> Result<Option<PathBuf>> {
@@ -174,5 +175,16 @@ mod tests {
                 .is_none()
         );
         assert!(!pending_path(&paths, "repo", "old").exists());
+    }
+
+    #[test]
+    fn recent_state_is_scoped_to_repository_and_branch() {
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join(".gitsama"));
+        super::mark_recent(&paths, "repo-a", "main", 5000).expect("mark");
+        assert!(super::take_recent(&paths, "repo-a", "main").expect("take"));
+        super::mark_recent(&paths, "repo-a", "main", 5000).expect("mark");
+        assert!(!super::take_recent(&paths, "repo-b", "main").expect("other repo"));
+        assert!(!super::take_recent(&paths, "repo-a", "feature").expect("other branch"));
     }
 }

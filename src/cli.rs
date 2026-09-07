@@ -675,6 +675,12 @@ mod tests {
     fn internal_commands_parse() {
         let cli = Cli::try_parse_from(["gitsama", "hook", "post-commit"]).expect("parse");
         assert!(matches!(cli.command, Some(Command::Hook { .. })));
+        let cli = Cli::try_parse_from(["gitsama", "hook", "post-rewrite", "rebase"])
+            .expect("hook arguments");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Hook { args, .. }) if args == vec!["rebase"]
+        ));
     }
 
     #[test]

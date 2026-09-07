@@ -297,7 +297,7 @@ fn handle_checkout(paths: &AppPaths, config: &Config, args: &[String]) -> Result
                 },
             );
         }
-        if state::take_recent(paths, &branch)? {
+        if state::take_recent(paths, &repository, &branch)? {
             return Ok(());
         }
     }
@@ -397,7 +397,7 @@ fn run_pending(repository: &str, branch: &str) -> Result<()> {
             commit_count: None,
         },
     )?;
-    state::mark_recent(&paths, &pending.branch, BRANCH_RECENT_AGE_MS)
+    state::mark_recent(&paths, repository, &pending.branch, BRANCH_RECENT_AGE_MS)
 }
 
 fn set_global(key: &str, value: &str, append: bool) -> Result<()> {

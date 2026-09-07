@@ -198,32 +198,55 @@ fn setup() -> Result<()> {
     if packs::find(&paths, &config.active_pack).is_err() {
         config.active_pack = "starter".to_owned();
     }
-    config.save(&paths)?;
-
-    let executable = env::current_exe()
-        .map_err(|error| Error::message(format!("could not find the GitSama binary: {error}")))?;
-    hooks::install_global(&executable)?;
 
     println!("GitSama setup");
     println!();
     println!("✓ Git {}", version.short());
     println!("✓ Git 2.54 named hook system");
     println!("✓ Starter pack ready");
+
+    if interactive() {
+        println!();
+        println!("Choose your first pack:");
+        for pack in packs::installed(&paths)? {
+            println!("  {} ({})", pack.manifest.name, pack.manifest.id);
+        }
+        if let Some(pack_id) = prompt_optional("Pack id (Enter keeps current): ")? {
+            let pack = packs::find(&paths, &pack_id)?;
+            config.active_pack = pack.manifest.id;
+        }
+
+        if let Some(value) = prompt_optional("Volume 0-100 (Enter keeps current): ")? {
+            config.volume = parse_volume(&value)?;
+        }
+        if let Some(value) = prompt_optional("Massive push threshold (Enter keeps current): ")? {
+            config.massive_push_threshold = parse_threshold(&value)?;
+        }
+        println!();
+        println!("Choose events:");
+        for event in EventKind::ALL {
+            let enabled = prompt_yes_no(
+                &format!("Enable {}? [Y/n] ", event.label()),
+                config.is_event_enabled(event),
+            )?;
+            config.set_event_enabled(event, enabled);
+        }
+    }
+
+    config.save(&paths)?;
+
+    let executable = env::current_exe()
+        .map_err(|error| Error::message(format!("could not find the GitSama binary: {error}")))?;
+    hooks::install_global(&executable)?;
+
     println!("✓ GitSama hooks registered");
     println!();
     println!("Active pack: {}", config.active_pack);
     println!("Volume: {}%", config.volume);
     println!("Massive push threshold: {}", config.massive_push_threshold);
 
-    if interactive() {
-        println!();
-        println!("Available packs:");
-        for pack in packs::installed(&paths)? {
-            println!("  {} ({})", pack.manifest.name, pack.manifest.id);
-        }
-        if prompt_yes_no("Test a sound now? [Y/n] ", true)? {
-            test_one(&paths, &config, EventKind::Commit)?;
-        }
+    if interactive() && prompt_yes_no("Test a sound now? [Y/n] ", true)? {
+        test_one(&paths, &config, EventKind::Commit)?;
     }
 
     println!();
@@ -293,12 +316,23 @@ fn settings() -> Result<()> {
 
     if interactive() {
         println!();
+        if let Some(pack_id) = prompt_optional("Active pack (Enter keeps current): ")? {
+            let pack = packs::find(&paths, &pack_id)?;
+            config.active_pack = pack.manifest.id;
+        }
         if let Some(value) = prompt_optional("New volume (Enter keeps current): ")? {
             config.volume = parse_volume(&value)?;
         }
         if let Some(value) = prompt_optional("New massive push threshold (Enter keeps current): ")?
         {
             config.massive_push_threshold = parse_threshold(&value)?;
+        }
+        for event in EventKind::ALL {
+            let enabled = prompt_yes_no(
+                &format!("Enable {}? [Y/n] ", event.label()),
+                config.is_event_enabled(event),
+            )?;
+            config.set_event_enabled(event, enabled);
         }
         config.save(&paths)?;
         println!("Settings saved.");

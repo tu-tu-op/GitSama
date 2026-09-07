@@ -537,7 +537,7 @@ fn custom_pack_scaffold_import_select_and_test_workflow() {
 fn malformed_runtime_state_cannot_fail_a_hook() {
     let sandbox = Sandbox::new();
     fs::create_dir_all(&sandbox.home).expect("home");
-    fs::write(&sandbox.home.join("config.toml"), "volume = nope\n").expect("bad config");
+    fs::write(sandbox.home.join("config.toml"), "volume = nope\n").expect("bad config");
     let output = sandbox.tool(None, &["hook", "post-commit"]);
     assert!(output.status.success());
 

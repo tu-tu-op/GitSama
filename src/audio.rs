@@ -15,8 +15,7 @@ use crate::{
     config::Config,
     error::{Error, Result},
     events::EventKind,
-    logging,
-    packs,
+    logging, packs,
     paths::AppPaths,
 };
 
@@ -46,7 +45,7 @@ pub fn dispatch(
     }
 
     let pack = packs::find(paths, &config.active_pack)?;
-    let Some((resolved_event, _)) = pack.resolve(requested) else {
+    let Some((resolved_event, _)) = resolve_enabled(config, &pack, requested) else {
         return Ok(());
     };
 
@@ -59,8 +58,9 @@ pub fn dispatch(
         return write_test_record(&record);
     }
 
-    let executable = env::current_exe()
-        .map_err(|error| Error::Audio(format!("could not locate the GitSama executable: {error}")))?;
+    let executable = env::current_exe().map_err(|error| {
+        Error::Audio(format!("could not locate the GitSama executable: {error}"))
+    })?;
     let mut child = Command::new(executable);
     child
         .arg("__play")
@@ -90,15 +90,29 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
     let stream = OutputStreamBuilder::open_default_stream()
         .map_err(|error| Error::Audio(error.to_string()))?;
     let sink = Sink::connect_new(stream.mixer());
-    let file = File::open(&path).map_err(|error| Error::Audio(format!(
-        "could not open {}: {error}",
-        path.display()
-    )))?;
+    let file = File::open(&path)
+        .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
     let decoder = Decoder::try_from(file).map_err(|error| Error::Audio(error.to_string()))?;
     sink.set_volume(f32::from(config.volume) / 100.0);
     sink.append(decoder);
     sink.sleep_until_end();
     Ok(())
+}
+
+fn resolve_enabled(
+    config: &Config,
+    pack: &packs::Pack,
+    requested: EventKind,
+) -> Option<(EventKind, PathBuf)> {
+    if config.is_event_enabled(requested) {
+        if let Some(resolved) = pack.resolve(requested) {
+            return Some(resolved);
+        }
+    }
+    if requested == EventKind::MassivePush && config.is_event_enabled(EventKind::Push) {
+        return pack.resolve(EventKind::MassivePush);
+    }
+    None
 }
 
 pub fn probe_output() -> Result<()> {
@@ -115,8 +129,7 @@ fn write_test_record(record: &TestRecord) -> Result<()> {
     let path = env::var_os("GITSAMA_TEST_LOG")
         .map(PathBuf::from)
         .ok_or_else(|| Error::Audio("GITSAMA_TEST_LOG is not set".to_owned()))?;
-    let text =
-        serde_json::to_string(record).map_err(|error| Error::Audio(error.to_string()))?;
+    let text = serde_json::to_string(record).map_err(|error| Error::Audio(error.to_string()))?;
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -224,10 +237,13 @@ mod tests {
             commit_count: None,
         })
         .expect("record");
-        assert!(fs::read_to_string(log).expect("read").contains("\"event\":\"commit\""));
+        assert!(
+            fs::read_to_string(log)
+                .expect("read")
+                .contains("\"event\":\"commit\"")
+        );
         unsafe {
             env::remove_var("GITSAMA_TEST_LOG");
         }
     }
 }
-

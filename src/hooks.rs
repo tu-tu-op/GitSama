@@ -78,7 +78,7 @@ fn hook_command(binary: &Path, native_event: &str) -> String {
     // before the guard; any appended arguments to ':' are harmless. The guard
     // also covers failures that happen before our Rust handler can start.
     format!(
-        "GITSAMA_GIT_PID=\"$PPID\" {} hook {native_event} \"$@\" >/dev/null 2>&1 || :",
+        "{} hook {native_event} \"$@\" >/dev/null 2>&1 || :",
         platform::shell_quote(binary)
     )
 }
@@ -325,6 +325,11 @@ fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Res
         .read_to_string(&mut input)
         .map_err(|error| Error::Git(format!("could not read reference transaction: {error}")))?;
     let repository = git::repository_identity()?;
+    // A first commit materializes the unborn HEAD branch. Git reports it as
+    // a ref creation too, but post-commit already represents that action.
+    // During switch -c / checkout -b, HEAD still names the previous branch
+    // when the new branch's ref transaction commits.
+    let current_branch = git::current_branch().ok();
     for line in input.lines() {
         let Some((old_value, new_value, reference)) = parse_transaction_line(line) else {
             continue;
@@ -333,6 +338,9 @@ fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Res
         let old_zero = git::is_zero_oid(old_value);
         let new_zero = git::is_zero_oid(new_value);
         if old_zero && !new_zero && config.is_event_enabled(EventKind::BranchCreate) {
+            if current_branch.as_deref() == Some(branch) {
+                continue;
+            }
             let pending = PendingBranch {
                 repository: repository.clone(),
                 branch: branch.to_owned(),

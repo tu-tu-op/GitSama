@@ -4,7 +4,7 @@ A GitSama pack is a data-only directory. It contains a manifest and audio files;
 
 ## Directory layout
 
-§§§text
+```text
 my-pack/
 ├── pack.toml
 ├── README.md
@@ -13,13 +13,13 @@ my-pack/
     ├── commit-2.wav
     ├── push.mp3
     └── massive-push.flac
-§§§
+```
 
 ## Manifest schema
 
 The current schema is version 1:
 
-§§§toml
+```toml
 schema_version = 1
 
 id = "my-pack"
@@ -41,7 +41,7 @@ branch_create = ["audio/branch-create.wav"]
 branch_delete = ["audio/branch-delete.wav"]
 branch_switch = ["audio/branch-switch.wav"]
 rebase = ["audio/rebase.wav"]
-§§§
+```
 
 The required metadata fields are schema_version, id, name, author, version, description, and license. Event keys are exactly commit, push, massive_push, merge, branch_switch, branch_create, branch_delete, and rebase. Every value is an array of relative paths.
 
@@ -57,7 +57,7 @@ The Starter pack is generated from simple PCM tones on first setup. It contains 
 
 ## Create a pack
 
-§§§sh
+```sh
 gitsama pack scaffold "My Custom Pack"
 cd my-custom-pack
 # add files under audio/ and edit pack.toml
@@ -65,13 +65,13 @@ gitsama pack validate .
 gitsama pack add .
 gitsama use my-custom-pack
 gitsama test all
-§§§
+```
 
 The optional scaffold directory is a parent directory:
 
-§§§sh
+```sh
 gitsama pack scaffold "My Custom Pack" ./packs
-§§§
+```
 
 This creates ./packs/my-custom-pack.
 
@@ -79,11 +79,11 @@ This creates ./packs/my-custom-pack.
 
 Validate before importing. Import copies the validated directory into the user's GitSama home:
 
-§§§sh
+```sh
 gitsama pack add ./my-custom-pack
 gitsama pack list
 gitsama pack remove my-custom-pack
-§§§
+```
 
 The importer refuses to replace an existing pack. Remove the old pack explicitly before importing an updated copy.
 
@@ -92,4 +92,3 @@ The importer refuses to replace an existing pack. Remove the old pack explicitly
 Manifests cannot contain shell commands, executable commands, or remote download instructions. GitSama never executes pack files.
 
 Do not include copyrighted anime dialogue, music, or sound effects in this repository. You can create a local pack from media you are legally allowed to use. A public pack contribution must include permission to redistribute every audio file and clear license information. The GitSama MIT license does not apply automatically to pack audio.
-

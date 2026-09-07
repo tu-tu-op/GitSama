@@ -9,8 +9,8 @@ permissions:
 
 jobs:
   check:
-    name: Check (§{{ matrix.os }})
-    runs-on: §{{ matrix.os }}
+    name: "Check (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,4 +39,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-features --locked
-

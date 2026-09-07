@@ -210,6 +210,14 @@ fn setup() -> Result<()> {
     println!("✓ Git {}", version.short());
     println!("✓ Git 2.54 named hook system");
     println!("✓ Starter pack ready");
+    if audio::test_mode() {
+        println!("✓ Audio test mode enabled");
+    } else {
+        match audio::probe_output() {
+            Ok(()) => println!("✓ Audio output ready"),
+            Err(error) => println!("! Audio output unavailable: {error}"),
+        }
+    }
 
     if interactive() {
         println!();

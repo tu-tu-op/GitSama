@@ -53,7 +53,7 @@ Installing GitSama never adds files to repositories you collaborate on. Its perm
 - A normal user account; administrator or root privileges are not required
 - An audio output device for real playback
 
-GitSama uses Git's user-level configured hook system introduced for this workflow in Git 2.54. It registers named hooks with absolute commands, so it continues to work when an IDE has a different PATH. It never changes core.hooksPath, replaces .git/hooks/*, or removes an existing hook.
+GitSama uses Git's [user-level configured hook system](https://git-scm.com/docs/git-hook/2.54.0.html) introduced for this workflow in Git 2.54. It registers named hooks with absolute commands, so it continues to work when an IDE has a different PATH. It never changes core.hooksPath, replaces .git/hooks/*, or removes an existing hook.
 
 If Git is older, setup stops before changing Git configuration and explains the detected version.
 

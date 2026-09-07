@@ -10,6 +10,15 @@ use std::{
 use serde_json::Value;
 use tempfile::{TempDir, tempdir};
 
+const NATIVE_HOOKS: [&str; 6] = [
+    "post-commit",
+    "pre-push",
+    "post-merge",
+    "post-checkout",
+    "reference-transaction",
+    "post-rewrite",
+];
+
 struct Sandbox {
     _directory: TempDir,
     home: PathBuf,
@@ -139,6 +148,36 @@ impl Sandbox {
         output
     }
 
+    fn bare_remote(&self, name: &str) -> PathBuf {
+        let remote = self._directory.path().join(name);
+        self.git_ok(
+            None,
+            &[
+                "init",
+                "--bare",
+                "--quiet",
+                "-b",
+                "main",
+                remote.to_str().expect("remote"),
+            ],
+        );
+        // A local transport launches receive-pack under the pushing user's
+        // environment. Model a separate remote account without GitSama, so
+        // its ref updates don't contaminate client-side push assertions.
+        for hook in NATIVE_HOOKS {
+            self.git_ok(
+                Some(&remote),
+                &[
+                    "config",
+                    "--local",
+                    &format!("hook.gitsama-{hook}.enabled"),
+                    "false",
+                ],
+            );
+        }
+        remote
+    }
+
     fn tool_ok(&self, directory: Option<&Path>, args: &[&str]) -> Output {
         let output = self.tool(directory, args);
         assert!(
@@ -195,8 +234,8 @@ impl Sandbox {
                 quiet_since = Instant::now();
                 previous.clone_from(&events);
             }
-            // Cover the 180ms dispatch delay and the 500ms dedup marker, so
-            // exact-count assertions also observe late duplicate events.
+            // Cover the detached dispatch delay and observe a quiet period,
+            // so exact-count assertions also catch late duplicate events.
             if events.len() >= minimum && quiet_since.elapsed() >= Duration::from_millis(750) {
                 return events;
             }
@@ -274,16 +313,7 @@ fn push_and_massive_push_are_classified() {
     let sandbox = Sandbox::new();
     sandbox.setup();
     let repo = sandbox.init_repo("push-repo");
-    let remote = sandbox._directory.path().join("remote.git");
-    sandbox.git_ok(
-        None,
-        &[
-            "init",
-            "--bare",
-            "--quiet",
-            remote.to_str().expect("remote"),
-        ],
-    );
+    let remote = sandbox.bare_remote("remote.git");
     sandbox.git_ok(
         Some(&repo),
         &["remote", "add", "origin", remote.to_str().expect("remote")],
@@ -309,16 +339,7 @@ fn multiple_pushed_refs_count_shared_commits_once() {
     let sandbox = Sandbox::new();
     sandbox.setup();
     let repo = sandbox.init_repo("multi-push-repo");
-    let remote = sandbox._directory.path().join("multi-push.git");
-    sandbox.git_ok(
-        None,
-        &[
-            "init",
-            "--bare",
-            "--quiet",
-            remote.to_str().expect("remote"),
-        ],
-    );
+    let remote = sandbox.bare_remote("multi-push.git");
     sandbox.git_ok(
         Some(&repo),
         &["remote", "add", "origin", remote.to_str().expect("remote")],
@@ -444,6 +465,24 @@ fn rebase_fires_and_amend_does_not_fire_rebase() {
 }
 
 #[test]
+fn separate_create_and_switch_commands_keep_their_own_events() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("separate-branch-actions");
+    sandbox.commit(&repo, "base");
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["branch", "feature"]);
+    // No delay: this must not consume the preceding Git process's event.
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "feature"]);
+    let mut events = sandbox.wait_for_events(2);
+    events.sort();
+    assert_eq!(events, vec!["branch_create", "branch_switch"]);
+}
+
+#[test]
 fn clone_initialization_does_not_sound_like_a_switch() {
     if skip_if_unsupported() {
         return;
@@ -474,16 +513,7 @@ fn personal_installations_do_not_cross_talk() {
     }
     let sandbox = Sandbox::new();
     sandbox.setup();
-    let remote = sandbox._directory.path().join("shared.git");
-    sandbox.git_ok(
-        None,
-        &[
-            "init",
-            "--bare",
-            "--quiet",
-            remote.to_str().expect("remote"),
-        ],
-    );
+    let remote = sandbox.bare_remote("shared.git");
 
     let user_b_root = sandbox._directory.path().join("user-b");
     fs::create_dir_all(&user_b_root).expect("user b");

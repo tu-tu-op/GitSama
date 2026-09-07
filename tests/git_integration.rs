@@ -317,6 +317,12 @@ fn branch_lifecycle_and_create_switch_deduplicate() {
     sandbox.git_ok(Some(&repo), &["branch", "-d", "new-feature"]);
     let events = sandbox.wait_for_events(1);
     assert_eq!(events, vec!["branch_delete"]);
+
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["checkout", "-b", "checkout-feature"]);
+    let events = sandbox.wait_for_events(1);
+    assert_eq!(events, vec!["branch_create"]);
+    assert_eq!(sandbox.event_names(), vec!["branch_create"]);
 }
 
 #[test]

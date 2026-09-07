@@ -62,7 +62,6 @@ pub fn install_global(binary: &Path) -> Result<()> {
         unset_global(&format!("{name}.event"))?;
         unset_global(&format!("{name}.command"))?;
         unset_global(&format!("{name}.enabled"))?;
-        unset_global(&format!("{name}.parallel"))?;
         set_global(&format!("{name}.event"), hook.native_event, true)?;
         set_global(
             &format!("{name}.command"),
@@ -74,7 +73,6 @@ pub fn install_global(binary: &Path) -> Result<()> {
             false,
         )?;
         set_global(&format!("{name}.enabled"), "true", false)?;
-        set_global(&format!("{name}.parallel"), "true", false)?;
     }
     Ok(())
 }
@@ -82,7 +80,7 @@ pub fn install_global(binary: &Path) -> Result<()> {
 pub fn remove_global() -> Result<()> {
     for hook in HOOKS {
         let name = format!("hook.{}", hook.friendly_name);
-        for suffix in ["event", "command", "enabled", "parallel"] {
+        for suffix in ["event", "command", "enabled"] {
             unset_global(&format!("{name}.{suffix}"))?;
         }
     }

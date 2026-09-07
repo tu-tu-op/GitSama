@@ -129,6 +129,7 @@ pub fn run(fix: bool) -> Result<()> {
         Ok(None) => ok("core.hooksPath remains unset"),
         Err(error) => warn(&format!("core.hooksPath could not be inspected: {error}")),
     }
+    ok("Existing repository hooks remain available; GitSama does not replace .git/hooks");
 
     println!();
     println!("Diagnostic log: {}", paths.log.display());

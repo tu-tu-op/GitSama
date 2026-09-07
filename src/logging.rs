@@ -51,4 +51,3 @@ mod tests {
         assert!(fs::read_to_string(path).expect("read").contains("new line"));
     }
 }
-

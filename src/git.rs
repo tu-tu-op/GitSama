@@ -1,6 +1,7 @@
 use std::{
-    env, fs,
+    env,
     ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -22,7 +23,11 @@ impl GitVersion {
     pub fn parse(text: &str) -> Result<Self> {
         let version = text
             .split_whitespace()
-            .find(|part| part.chars().next().is_some_and(|character| character.is_ascii_digit()))
+            .find(|part| {
+                part.chars()
+                    .next()
+                    .is_some_and(|character| character.is_ascii_digit())
+            })
             .ok_or_else(|| Error::Git("Git did not report a version".to_owned()))?;
 
         let mut parts = version.splitn(3, '.');
@@ -54,12 +59,14 @@ impl GitVersion {
     }
 
     pub const fn is_supported(&self) -> bool {
-        self.major > MIN_GIT_MAJOR
-            || (self.major == MIN_GIT_MAJOR && self.minor >= MIN_GIT_MINOR)
+        self.major > MIN_GIT_MAJOR || (self.major == MIN_GIT_MAJOR && self.minor >= MIN_GIT_MINOR)
     }
 
     pub fn short(&self) -> String {
-        format!("{}.{}.{}{}", self.major, self.minor, self.patch, self.suffix)
+        format!(
+            "{}.{}.{}{}",
+            self.major, self.minor, self.patch, self.suffix
+        )
     }
 }
 
@@ -241,4 +248,3 @@ mod tests {
         assert!(!is_zero_oid(""));
     }
 }
-

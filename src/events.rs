@@ -89,4 +89,3 @@ impl FromStr for EventKind {
         }
     }
 }
-

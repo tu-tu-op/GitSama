@@ -7,13 +7,11 @@ use std::{
 use clap::{Parser, Subcommand};
 
 use crate::{
-    audio::{self, DispatchDetails},
+    audio,
     config::Config,
     error::{Error, Result},
     events::EventKind,
-    git,
-    hooks,
-    packs,
+    git, hooks, packs,
     paths::AppPaths,
 };
 
@@ -139,7 +137,10 @@ fn dashboard() -> Result<()> {
     let config = Config::load_or_default(&paths);
     let state = if !config.enabled {
         "MUTED"
-    } else if hooks::HOOKS.iter().any(|hook| hooks::local_is_disabled(*hook)) {
+    } else if hooks::HOOKS
+        .iter()
+        .any(|hook| hooks::local_is_disabled(*hook))
+    {
         "DISABLED HERE"
     } else {
         "ON"
@@ -242,7 +243,9 @@ fn status() -> Result<()> {
     let config = Config::load_or_default(&paths);
     let repository = git::repository_root().ok();
     let local_disabled = repository.is_some()
-        && hooks::HOOKS.iter().any(|hook| hooks::local_is_disabled(*hook));
+        && hooks::HOOKS
+            .iter()
+            .any(|hook| hooks::local_is_disabled(*hook));
     let global_hooks = hooks::HOOKS
         .iter()
         .filter(|hook| hooks::global_is_registered(**hook))
@@ -262,7 +265,10 @@ fn status() -> Result<()> {
     println!("Active pack  {}", config.active_pack);
     println!("Volume       {}%", config.volume);
     println!("Big Push     {} commits", config.massive_push_threshold);
-    println!("Hooks        {global_hooks}/{} registered", hooks::HOOKS.len());
+    println!(
+        "Hooks        {global_hooks}/{} registered",
+        hooks::HOOKS.len()
+    );
     if let Some(repository) = repository {
         println!("Repository   {}", repository.display());
     }
@@ -281,7 +287,8 @@ fn settings() -> Result<()> {
         if let Some(value) = prompt_optional("New volume (Enter keeps current): ")? {
             config.volume = parse_volume(&value)?;
         }
-        if let Some(value) = prompt_optional("New massive push threshold (Enter keeps current): ")? {
+        if let Some(value) = prompt_optional("New massive push threshold (Enter keeps current): ")?
+        {
             config.massive_push_threshold = parse_threshold(&value)?;
         }
         config.save(&paths)?;
@@ -293,14 +300,21 @@ fn settings() -> Result<()> {
 fn print_config(config: &Config) {
     println!("Active Pack          {}", config.active_pack);
     println!("Volume               {}%", config.volume);
-    println!("Massive Push         {} commits", config.massive_push_threshold);
+    println!(
+        "Massive Push         {} commits",
+        config.massive_push_threshold
+    );
     println!();
     println!("Events");
     for event in EventKind::ALL {
         println!(
             "  {:<18} {}",
             event.label(),
-            if config.is_event_enabled(event) { "✓" } else { "—" }
+            if config.is_event_enabled(event) {
+                "✓"
+            } else {
+                "—"
+            }
         );
     }
 }
@@ -312,7 +326,11 @@ fn packs_picker() -> Result<()> {
     println!("GitSama Packs");
     println!();
     for pack in &installed {
-        let marker = if pack.manifest.id == config.active_pack { "✓" } else { " " };
+        let marker = if pack.manifest.id == config.active_pack {
+            "✓"
+        } else {
+            " "
+        };
         println!("  {marker} {} ({})", pack.manifest.name, pack.manifest.id);
     }
     if interactive() {
@@ -379,7 +397,7 @@ fn test_command(value: Option<&str>) -> Result<()> {
     packs::ensure_starter(&paths)?;
     let config = Config::load_or_default(&paths);
     let value = match value {
-        Some(value) => value,
+        Some(value) => value.to_owned(),
         None if interactive() => {
             println!("Choose a sound to test:");
             for (index, event) in EventKind::ALL.iter().enumerate() {
@@ -387,9 +405,13 @@ fn test_command(value: Option<&str>) -> Result<()> {
             }
             println!("  9. Play All");
             let answer = prompt_line("Choice [1-9]: ")?;
-            if answer.trim() == "9" { "all" } else { answer.trim() }
+            if answer.trim() == "9" {
+                "all".to_owned()
+            } else {
+                answer.trim().to_owned()
+            }
         }
-        None => "all",
+        None => "all".to_owned(),
     };
 
     if value.eq_ignore_ascii_case("all") {
@@ -401,7 +423,7 @@ fn test_command(value: Option<&str>) -> Result<()> {
 
     let event = match value.parse::<usize>() {
         Ok(index) if (1..=EventKind::ALL.len()).contains(&index) => EventKind::ALL[index - 1],
-        _ => EventKind::parse(value)?,
+        _ => EventKind::parse(&value)?,
     };
     test_one(&paths, &config, event)
 }
@@ -450,9 +472,7 @@ fn parse_threshold(value: &str) -> Result<u32> {
         .parse::<u32>()
         .map_err(|_| Error::message("massive push threshold must be a positive number"))?;
     if value == 0 {
-        return Err(Error::message(
-            "massive push threshold must be at least 1",
-        ));
+        return Err(Error::message("massive push threshold must be at least 1"));
     }
     Ok(value)
 }
@@ -476,17 +496,13 @@ fn set_enabled(enabled: bool) -> Result<()> {
     let mut config = Config::load_or_default(&paths);
     config.enabled = enabled;
     config.save(&paths)?;
-    println!(
-        "✓ GitSama {}",
-        if enabled { "unmuted" } else { "muted" }
-    );
+    println!("✓ GitSama {}", if enabled { "unmuted" } else { "muted" });
     Ok(())
 }
 
 fn off_here() -> Result<()> {
-    let root = git::repository_root().map_err(|_| {
-        Error::message("run gitsama off-here inside a Git repository")
-    })?;
+    let root = git::repository_root()
+        .map_err(|_| Error::message("run gitsama off-here inside a Git repository"))?;
     hooks::disable_here()?;
     println!("✓ GitSama disabled for:");
     println!();
@@ -497,9 +513,8 @@ fn off_here() -> Result<()> {
 }
 
 fn on_here() -> Result<()> {
-    let root = git::repository_root().map_err(|_| {
-        Error::message("run gitsama on-here inside a Git repository")
-    })?;
+    let root = git::repository_root()
+        .map_err(|_| Error::message("run gitsama on-here inside a Git repository"))?;
     hooks::enable_here()?;
     println!("✓ GitSama enabled again for:");
     println!();
@@ -551,7 +566,11 @@ fn prompt_line(prompt: &str) -> Result<String> {
 
 fn prompt_optional(prompt: &str) -> Result<Option<String>> {
     let value = prompt_line(prompt)?;
-    if value.is_empty() { Ok(None) } else { Ok(Some(value)) }
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value))
+    }
 }
 
 fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {

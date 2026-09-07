@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process,
-};
+use std::{fs, path::PathBuf, process};
 
 use serde::{Deserialize, Serialize};
 
@@ -83,15 +79,18 @@ pub fn take_recent(paths: &AppPaths, branch: &str) -> Result<bool> {
     let result = fs::read_to_string(&claim)
         .ok()
         .and_then(|text| serde_json::from_str::<RecentBranch>(&text).ok())
-        .is_some_and(|recent| recent.branch == branch && recent.expires_at_ms >= logging::now_millis());
+        .is_some_and(|recent| {
+            recent.branch == branch && recent.expires_at_ms >= logging::now_millis()
+        });
     let _ = fs::remove_file(&claim);
     Ok(result)
 }
 
 pub fn pending_path(paths: &AppPaths, repository: &str, branch: &str) -> PathBuf {
-    paths
-        .state
-        .join(format!("pending-{}.json", stable_key(&format!("{repository}\0{branch}"))))
+    paths.state.join(format!(
+        "pending-{}.json",
+        stable_key(&format!("{repository}\0{branch}"))
+    ))
 }
 
 fn recent_path(paths: &AppPaths, branch: &str) -> PathBuf {
@@ -151,9 +150,11 @@ mod tests {
                 .branch,
             "feature"
         );
-        assert!(take_pending(&paths, "repo", "feature", 5000)
-            .expect("take")
-            .is_none());
+        assert!(
+            take_pending(&paths, "repo", "feature", 5000)
+                .expect("take")
+                .is_none()
+        );
     }
 
     #[test]
@@ -167,10 +168,11 @@ mod tests {
             created_at_ms: 0,
         };
         write_pending(&paths, &pending).expect("write");
-        assert!(take_pending(&paths, "repo", "old", 1)
-            .expect("take")
-            .is_none());
+        assert!(
+            take_pending(&paths, "repo", "old", 1)
+                .expect("take")
+                .is_none()
+        );
         assert!(!pending_path(&paths, "repo", "old").exists());
     }
 }
-

@@ -57,11 +57,7 @@ pub fn parse_line(line: &str) -> Result<PushRef> {
     })
 }
 
-pub fn classify(
-    refs: &[PushRef],
-    remote_name: &str,
-    threshold: u32,
-) -> Result<PushClassification> {
+pub fn classify(refs: &[PushRef], remote_name: &str, threshold: u32) -> Result<PushClassification> {
     if threshold == 0 {
         return Err(Error::message("push threshold must be at least 1"));
     }
@@ -73,7 +69,9 @@ pub fn classify(
     }
 
     for push_ref in refs.iter().filter(|push_ref| {
-        push_ref.is_branch() && !push_ref.is_deleted() && !git::is_zero_oid(&push_ref.local_object_id)
+        push_ref.is_branch()
+            && !push_ref.is_deleted()
+            && !git::is_zero_oid(&push_ref.local_object_id)
     }) {
         let mut args = vec![
             "rev-list".to_owned(),
@@ -182,7 +180,9 @@ where
     if output.status.success() {
         Ok(())
     } else {
-        Err(Error::Git(String::from_utf8_lossy(&output.stderr).trim().to_owned()))
+        Err(Error::Git(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ))
     }
 }
 
@@ -219,4 +219,3 @@ mod tests {
         assert!(git::is_zero_oid(&"0".repeat(40)));
     }
 }
-

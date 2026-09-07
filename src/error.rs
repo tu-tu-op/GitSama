@@ -42,4 +42,3 @@ impl Error {
         Self::Message(value.into())
     }
 }
-

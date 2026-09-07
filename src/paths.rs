@@ -1,6 +1,5 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -57,4 +56,3 @@ impl AppPaths {
         path.starts_with(&self.root)
     }
 }
-

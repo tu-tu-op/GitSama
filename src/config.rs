@@ -121,8 +121,9 @@ impl Config {
     pub fn save(&self, paths: &AppPaths) -> Result<()> {
         self.validate()?;
         paths.ensure_layout()?;
-        let text = toml::to_string_pretty(self)
-            .map_err(|error| Error::Config(format!("could not serialize configuration: {error}")))?;
+        let text = toml::to_string_pretty(self).map_err(|error| {
+            Error::Config(format!("could not serialize configuration: {error}"))
+        })?;
         fs::write(&paths.config, text).map_err(|source| Error::WriteFile {
             path: paths.config.clone(),
             source,
@@ -207,7 +208,7 @@ impl EventSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, CONFIG_SCHEMA_VERSION};
+    use super::{CONFIG_SCHEMA_VERSION, Config};
     use crate::events::EventKind;
 
     #[test]
@@ -246,4 +247,3 @@ mod tests {
         assert!(!config.is_event_enabled(EventKind::Rebase));
     }
 }
-

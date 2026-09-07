@@ -1,14 +1,6 @@
 use std::{env, fs};
 
-use crate::{
-    audio,
-    config::Config,
-    error::Result,
-    git,
-    hooks,
-    packs,
-    paths::AppPaths,
-};
+use crate::{audio, config::Config, error::Result, git, hooks, packs, paths::AppPaths};
 
 pub fn run(fix: bool) -> Result<()> {
     let paths = AppPaths::discover()?;
@@ -134,4 +126,3 @@ fn ok(message: &str) {
 fn warn(message: &str) {
     println!("! {message}");
 }
-

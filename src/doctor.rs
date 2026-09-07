@@ -129,6 +129,21 @@ pub fn run(fix: bool) -> Result<()> {
         Ok(None) => ok("core.hooksPath remains unset"),
         Err(error) => warn(&format!("core.hooksPath could not be inspected: {error}")),
     }
+    if let Ok(root) = git::repository_root() {
+        if hooks::HOOKS
+            .iter()
+            .any(|hook| hooks::local_is_disabled(*hook))
+        {
+            warn(&format!(
+                "GitSama is disabled in this repository: {}",
+                root.display()
+            ));
+        } else {
+            ok("This repository inherits global GitSama behavior");
+        }
+    } else {
+        ok("No repository-local GitSama override is active here");
+    }
     ok("Existing repository hooks remain available; GitSama does not replace .git/hooks");
 
     println!();

@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde_json::Value;
@@ -158,6 +158,8 @@ impl Sandbox {
     }
 
     fn clear_log(&self) {
+        // Detached branch workers must finish before the next action starts.
+        self.wait_for_events(0);
         let _ = fs::remove_file(&self.log);
     }
 
@@ -178,12 +180,21 @@ impl Sandbox {
     }
 
     fn wait_for_events(&self, minimum: usize) -> Vec<String> {
-        for _ in 0..20 {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut quiet_since = Instant::now();
+        let mut previous = self.event_names();
+        while Instant::now() < deadline {
             let events = self.event_names();
-            if events.len() >= minimum {
+            if events != previous {
+                quiet_since = Instant::now();
+                previous.clone_from(&events);
+            }
+            // Cover the 180ms dispatch delay and the 500ms dedup marker, so
+            // exact-count assertions also observe late duplicate events.
+            if events.len() >= minimum && quiet_since.elapsed() >= Duration::from_millis(750) {
                 return events;
             }
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(25));
         }
         self.event_names()
     }
@@ -228,7 +239,7 @@ fn commit_hook_dispatches_one_event() {
     sandbox.setup();
     let repo = sandbox.init_repo("commit-repo");
     sandbox.commit(&repo, "ignored by test log");
-    assert_eq!(sandbox.event_names(), vec!["commit"]);
+    assert_eq!(sandbox.wait_for_events(1), vec!["commit"]);
 }
 
 #[test]
@@ -386,6 +397,8 @@ fn branch_lifecycle_and_create_switch_deduplicate() {
     let events = sandbox.wait_for_events(1);
     assert_eq!(events, vec!["branch_create"]);
 
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "main"]);
     sandbox.clear_log();
     sandbox.git_ok(Some(&repo), &["branch", "-d", "new-feature"]);
     let events = sandbox.wait_for_events(1);

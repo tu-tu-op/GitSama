@@ -69,6 +69,8 @@ pub enum Command {
     #[command(hide = true)]
     Hook {
         event: String,
+        #[arg(num_args = 0.., trailing_var_arg = true)]
+        args: Vec<String>,
     },
     #[command(name = "__play", hide = true)]
     Play {
@@ -120,9 +122,15 @@ pub fn run() -> Result<()> {
         Some(Command::OnHere) => on_here(),
         Some(Command::Doctor { fix }) => crate::doctor::run(fix),
         Some(Command::Uninstall) => uninstall(),
-        Some(Command::Hook { .. })
-        | Some(Command::Play { .. })
-        | Some(Command::DispatchPending { .. }) => Ok(()),
+        Some(Command::Hook { event, args }) => hooks::run_fail_open(&event, &args),
+        Some(Command::Play { event }) => {
+            let paths = AppPaths::discover()?;
+            let config = Config::load_or_default(&paths);
+            audio::play(&paths, &config, EventKind::parse(&event)?)
+        }
+        Some(Command::DispatchPending { repository, branch }) => {
+            hooks::run_pending_fail_open(&repository, &branch)
+        }
     }
 }
 
@@ -579,4 +587,3 @@ mod tests {
         assert!(parse_threshold("0").is_err());
     }
 }
-

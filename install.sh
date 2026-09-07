@@ -3,7 +3,7 @@ set -eu
 
 REPOSITORY="tu-tu-op/GitSama"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-USER_HOME="$HOME"
+USER_HOME=$(printenv HOME 2>/dev/null || true)
 if [ -z "$USER_HOME" ]; then
   echo "Could not find your home directory. Set HOME and run install.sh again." >&2
   exit 1
@@ -79,7 +79,8 @@ chmod 755 "$BIN_DIR/gitsama"
 
 PROFILE=$(printenv GITSAMA_SHELL_PROFILE 2>/dev/null || true)
 if [ -z "$PROFILE" ]; then
-  case $(basename "$SHELL") in
+  SHELL_NAME=$(printenv SHELL 2>/dev/null || true)
+  case $(basename "${SHELL_NAME:-sh}") in
     zsh) PROFILE="$USER_HOME/.zshrc" ;;
     *) PROFILE="$USER_HOME/.profile" ;;
   esac
@@ -97,4 +98,3 @@ GITSAMA_NONINTERACTIVE=1 "$BIN_DIR/gitsama" setup
 echo ""
 echo "GitSama installed at $BIN_DIR/gitsama."
 echo "Open a new shell if gitsama is not immediately on PATH."
-

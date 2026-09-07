@@ -51,6 +51,15 @@ pub struct PackSummary {
 impl Pack {
     pub fn load(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref();
+        if fs::symlink_metadata(root)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(Error::Pack(format!(
+                "pack root cannot be a symlink: {}",
+                root.display()
+            )));
+        }
         let root = fs::canonicalize(root).map_err(|source| Error::ReadFile {
             path: root.to_path_buf(),
             source,

@@ -548,6 +548,14 @@ fn traditional_repository_hooks_still_run() {
         marker.to_string_lossy()
     );
     fs::write(&hook, script).expect("traditional hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&hook, permissions).expect("hook permissions");
+    }
     sandbox.commit(&repo, "coexistence");
     assert!(marker.exists());
     assert_eq!(sandbox.event_names(), vec!["commit"]);
@@ -568,6 +576,16 @@ fn configured_hook_commands_work_from_a_path_with_spaces() {
     };
     let binary = spaced.join(binary_name);
     fs::copy(env!("CARGO_BIN_EXE_gitsama"), &binary).expect("copy binary");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(&binary)
+            .expect("binary metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&binary, permissions).expect("binary permissions");
+    }
     let setup = sandbox.tool_path(&binary, None, &["setup"]);
     assert!(setup.status.success(), "spaced setup failed");
 

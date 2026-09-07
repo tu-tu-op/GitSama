@@ -18,11 +18,18 @@ pub fn executable_name() -> &'static str {
 
 pub fn shell_quote(path: &Path) -> String {
     let value = path.to_string_lossy();
-    if cfg!(windows) {
-        format!("\"{}\"", value.replace('"', "\\\""))
+    // Configured hooks use Git's POSIX shell, including on Windows. Rust's
+    // canonicalize() adds a verbatim prefix which that shell cannot execute.
+    #[cfg(windows)]
+    let value = if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+        format!("//{}", unc.replace('\\', "/"))
     } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
+        value
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&value)
+            .replace('\\', "/")
+    };
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[cfg(windows)]
@@ -231,17 +238,28 @@ mod tests {
         } else {
             "/tmp/Git Sama/bin/gitsama"
         }));
-        assert!(quoted.starts_with(if cfg!(windows) { '"' } else { '\'' }));
+        assert!(quoted.starts_with('\''));
         assert!(quoted.contains("Git Sama"));
     }
 
     #[test]
-    fn quotes_single_quotes_on_unix() {
-        if !cfg!(windows) {
-            assert_eq!(
-                shell_quote(Path::new("/tmp/O'Reilly/gitsama")),
-                "'/tmp/O'\\''Reilly/gitsama'"
-            );
-        }
+    fn quotes_single_quotes_and_shell_metacharacters() {
+        assert_eq!(
+            shell_quote(Path::new("/tmp/O'Reilly/$HOME `name`/gitsama")),
+            "'/tmp/O'\\''Reilly/$HOME `name`/gitsama'"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalizes_verbatim_drive_and_unc_paths_for_git_shell() {
+        assert_eq!(
+            shell_quote(Path::new(r"\\?\C:\Git Sama\bin\gitsama.exe")),
+            "'C:/Git Sama/bin/gitsama.exe'"
+        );
+        assert_eq!(
+            shell_quote(Path::new(r"\\?\UNC\server\share\Git Sama\gitsama.exe")),
+            "'//server/share/Git Sama/gitsama.exe'"
+        );
     }
 }

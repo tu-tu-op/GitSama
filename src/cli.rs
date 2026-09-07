@@ -13,6 +13,7 @@ use crate::{
     events::EventKind,
     git, hooks, packs,
     paths::AppPaths,
+    platform,
 };
 
 #[derive(Debug, Parser)]
@@ -63,7 +64,10 @@ pub enum Command {
         #[arg(long)]
         fix: bool,
     },
-    Uninstall,
+    Uninstall {
+        #[arg(long)]
+        keep_data: bool,
+    },
     #[command(hide = true)]
     Hook {
         event: String,
@@ -119,7 +123,7 @@ pub fn run() -> Result<()> {
         Some(Command::OffHere) => off_here(),
         Some(Command::OnHere) => on_here(),
         Some(Command::Doctor { fix }) => crate::doctor::run(fix),
-        Some(Command::Uninstall) => uninstall(),
+        Some(Command::Uninstall { keep_data }) => uninstall(keep_data),
         Some(Command::Hook { event, args }) => hooks::run_fail_open(&event, &args),
         Some(Command::Play { event }) => {
             let paths = AppPaths::discover()?;
@@ -526,27 +530,50 @@ fn on_here() -> Result<()> {
     Ok(())
 }
 
-fn uninstall() -> Result<()> {
+fn uninstall(keep_data: bool) -> Result<()> {
     let paths = AppPaths::discover()?;
     println!("GitSama uninstall");
     println!();
     println!("This removes GitSama's named global hooks and:");
-    println!("  {}", paths.root.display());
+    if keep_data {
+        println!("  the GitSama executable and user PATH entry");
+        println!("  (packs and configuration are preserved)");
+    } else {
+        println!("  {}", paths.root.display());
+    }
     println!();
     if interactive() && !prompt_yes_no("Continue? [y/N] ", false)? {
         println!("Nothing removed.");
         return Ok(());
     }
     hooks::remove_global()?;
-    if paths.root.exists() {
+    let _ = platform::remove_user_path_entry(&paths.bin);
+    let executable = env::current_exe().ok();
+    let root_is_executable = executable.as_ref().is_some_and(|executable| {
+        let root = paths.root.canonicalize().unwrap_or_else(|_| paths.root.clone());
+        let executable = executable
+            .canonicalize()
+            .unwrap_or_else(|_| executable.clone());
+        executable.starts_with(root)
+    });
+    if let Some(executable) = executable.filter(|_| root_is_executable) {
+        platform::schedule_cleanup(
+            &executable,
+            (!keep_data).then_some(paths.root.as_path()),
+        )?;
+    } else if !keep_data && paths.root.exists() {
         std::fs::remove_dir_all(&paths.root).map_err(|source| Error::WriteFile {
             path: paths.root.clone(),
             source,
         })?;
     }
     println!("✓ GitSama hooks removed.");
-    println!("✓ GitSama home removed.");
-    println!("Remove the old executable from your PATH if it is outside that directory.");
+    if keep_data {
+        println!("✓ Packs and configuration preserved.");
+    } else {
+        println!("✓ GitSama home removal scheduled.");
+    }
+    println!("GitSama's named hooks were removed before cleanup.");
     Ok(())
 }
 

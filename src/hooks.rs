@@ -320,18 +320,17 @@ fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Res
         .map_err(|error| Error::Git(format!("could not read reference transaction: {error}")))?;
     let repository = git::repository_identity()?;
     for line in input.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() != 3 || !parts[0].starts_with("refs/heads/") {
+        let Some((old_value, new_value, reference)) = parse_transaction_line(line) else {
             continue;
-        }
-        let branch = parts[0].trim_start_matches("refs/heads/");
-        let old_zero = git::is_zero_oid(parts[1]);
-        let new_zero = git::is_zero_oid(parts[2]);
+        };
+        let branch = reference.trim_start_matches("refs/heads/");
+        let old_zero = git::is_zero_oid(old_value);
+        let new_zero = git::is_zero_oid(new_value);
         if old_zero && !new_zero && config.is_event_enabled(EventKind::BranchCreate) {
             let pending = PendingBranch {
                 repository: repository.clone(),
                 branch: branch.to_owned(),
-                object_id: parts[2].to_owned(),
+                object_id: new_value.to_owned(),
                 created_at_ms: logging::now_millis(),
             };
             state::write_pending(paths, &pending)?;
@@ -361,6 +360,17 @@ fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Res
         }
     }
     Ok(())
+}
+
+fn parse_transaction_line(line: &str) -> Option<(&str, &str, &str)> {
+    let mut parts = line.split_whitespace();
+    let old_value = parts.next()?;
+    let new_value = parts.next()?;
+    let reference = parts.next()?;
+    if parts.next().is_some() || !reference.starts_with("refs/heads/") {
+        return None;
+    }
+    Some((old_value, new_value, reference))
 }
 
 fn spawn_pending(repository: &str, branch: &str) -> Result<()> {
@@ -462,7 +472,7 @@ fn unset_scope(scope: &str, key: &str) -> Result<()> {
 mod tests {
     use std::path::Path;
 
-    use super::HOOKS;
+    use super::{HOOKS, parse_transaction_line};
     use crate::platform::shell_quote;
 
     #[test]
@@ -485,5 +495,17 @@ mod tests {
         let command = format!("{path} hook pre-push");
         assert!(command.contains("hook pre-push"));
         assert!(command.contains("Git Sama"));
+    }
+
+    #[test]
+    fn parses_reference_transaction_values_before_ref_name() {
+        let old = "0".repeat(40);
+        let new = "1".repeat(40);
+        let line = format!("{old} {new} refs/heads/feature");
+        assert_eq!(
+            parse_transaction_line(&line),
+            Some((old.as_str(), new.as_str(), "refs/heads/feature"))
+        );
+        assert!(parse_transaction_line("refs/heads/feature old new").is_none());
     }
 }

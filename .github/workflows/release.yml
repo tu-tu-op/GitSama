@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: gitsama-v${{ github.ref_name }}-windows-x86_64.zip
+            binary: gitsama.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: gitsama-v${{ github.ref_name }}-linux-x86_64.tar.gz
+            binary: gitsama
+          - os: macos-13
+            target: x86_64-apple-darwin
+            asset: gitsama-v${{ github.ref_name }}-macos-x86_64.tar.gz
+            binary: gitsama
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: gitsama-v${{ github.ref_name }}-macos-aarch64.tar.gz
+            binary: gitsama
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Linux audio build dependency
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Package Windows archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ASSET: ${{ matrix.asset }}
+          BINARY: ${{ matrix.binary }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          $staging = Join-Path $env:RUNNER_TEMP "gitsama-staging"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item -LiteralPath "target\$env:TARGET\release\$env:BINARY" -Destination (Join-Path $staging $env:BINARY)
+          Compress-Archive -Path (Join-Path $staging $env:BINARY) -DestinationPath $env:ASSET
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $env:ASSET).Hash.ToLower()
+          "$hash  $env:ASSET" | Out-File -Encoding ascii "$env:ASSET.sha256"
+
+      - name: Package Unix archive
+        if: runner.os != 'Windows'
+        env:
+          ASSET: ${{ matrix.asset }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          staging="$RUNNER_TEMP/gitsama-staging"
+          mkdir -p "$staging"
+          cp "target/$TARGET/release/gitsama" "$staging/gitsama"
+          tar -czf "$ASSET" -C "$staging" gitsama
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$ASSET" > "$ASSET.sha256"
+          else
+            shasum -a 256 "$ASSET" > "$ASSET.sha256"
+          fi
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*
+

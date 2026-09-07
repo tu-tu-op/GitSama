@@ -222,6 +222,24 @@ fn commit_hook_dispatches_one_event() {
 }
 
 #[test]
+fn setup_does_not_change_core_hooks_path() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.git_ok(
+        None,
+        &["config", "--global", "core.hooksPath", "custom-hooks"],
+    );
+    sandbox.setup();
+    let output = sandbox.git(None, &["config", "--global", "--get", "core.hooksPath"]);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "custom-hooks"
+    );
+}
+
+#[test]
 fn push_and_massive_push_are_classified() {
     if skip_if_unsupported() {
         return;
@@ -254,6 +272,51 @@ fn push_and_massive_push_are_classified() {
     sandbox.commit(&repo, "three");
     sandbox.git_ok(Some(&repo), &["push", "--quiet"]);
     assert!(sandbox.event_names().contains(&"massive_push".to_owned()));
+}
+
+#[test]
+fn multiple_pushed_refs_count_shared_commits_once() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("multi-push-repo");
+    let remote = sandbox._directory.path().join("multi-push.git");
+    sandbox.git_ok(
+        None,
+        &[
+            "init",
+            "--bare",
+            "--quiet",
+            remote.to_str().expect("remote"),
+        ],
+    );
+    sandbox.git_ok(
+        Some(&repo),
+        &["remote", "add", "origin", remote.to_str().expect("remote")],
+    );
+    sandbox.commit(&repo, "base");
+    sandbox.git_ok(Some(&repo), &["push", "--quiet", "-u", "origin", "main"]);
+    sandbox.clear_log();
+    sandbox.git_ok(
+        Some(&repo),
+        &["commit", "--quiet", "--allow-empty", "-m", "main-one"],
+    );
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "-c", "feature"]);
+    sandbox.commit(&repo, "feature-one");
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "main"]);
+    sandbox.commit(&repo, "main-two");
+    thread::sleep(Duration::from_millis(250));
+    sandbox.clear_log();
+    sandbox.tool_ok(None, &["threshold", "4"]);
+    sandbox.git_ok(
+        Some(&repo),
+        &["push", "--quiet", "origin", "main", "feature"],
+    );
+    let records = sandbox.records();
+    assert_eq!(sandbox.event_names(), vec!["push"]);
+    assert_eq!(records[0]["commit_count"].as_u64(), Some(3));
 }
 
 #[test]
@@ -407,6 +470,19 @@ fn personal_installations_do_not_cross_talk() {
         .env("HOME", &user_b_root)
         .env("USERPROFILE", &user_b_root);
     assert!(init_b.output().expect("init b").status.success());
+    let mut remote_b = Command::new("git");
+    remote_b.current_dir(&user_b_repo).args([
+        "remote",
+        "add",
+        "origin",
+        remote.to_str().expect("remote"),
+    ]);
+    remote_b
+        .env("GIT_CONFIG_GLOBAL", user_b_root.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("HOME", &user_b_root)
+        .env("USERPROFILE", &user_b_root);
+    assert!(remote_b.output().expect("remote b").status.success());
     let mut commit_b = Command::new("git");
     commit_b
         .current_dir(&user_b_repo)
@@ -421,6 +497,16 @@ fn personal_installations_do_not_cross_talk() {
         .env("GIT_COMMITTER_NAME", "B")
         .env("GIT_COMMITTER_EMAIL", "b@example.invalid");
     assert!(commit_b.output().expect("commit b").status.success());
+    let mut push_b = Command::new("git");
+    push_b
+        .current_dir(&user_b_repo)
+        .args(["push", "--quiet", "-u", "origin", "main"]);
+    push_b
+        .env("GIT_CONFIG_GLOBAL", user_b_root.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("HOME", &user_b_root)
+        .env("USERPROFILE", &user_b_root);
+    assert!(push_b.output().expect("push b").status.success());
     assert!(sandbox.event_names().is_empty());
 }
 

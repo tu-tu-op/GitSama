@@ -375,7 +375,10 @@ fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Res
                     },
                 )?;
             }
-        } else if !old_zero && new_zero {
+        } else if new_zero {
+            // An unconditional deletion (including git branch -d) may report
+            // an unspecified, all-zero old value. The committed zero target
+            // still represents deletion; requiring a nonzero old OID misses it.
             dispatch(
                 paths,
                 config,

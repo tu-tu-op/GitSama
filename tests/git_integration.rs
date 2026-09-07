@@ -657,6 +657,86 @@ fn malformed_runtime_state_cannot_fail_a_hook() {
 }
 
 #[test]
+fn missing_pack_and_broken_audio_cannot_fail_a_hook() {
+    let sandbox = Sandbox::new();
+    fs::create_dir_all(&sandbox.home).expect("home");
+    fs::write(
+        sandbox.home.join("config.toml"),
+        "active_pack = \"missing-pack\"\n",
+    )
+    .expect("missing pack config");
+    let missing = sandbox.tool(None, &["hook", "post-commit"]);
+    assert!(missing.status.success());
+    assert!(sandbox.event_names().is_empty());
+
+    fs::write(
+        sandbox.home.join("config.toml"),
+        "active_pack = \"starter\"\n",
+    )
+    .expect("starter config");
+    sandbox.tool_ok(None, &["test", "commit"]);
+    sandbox.clear_log();
+    let manifest = sandbox.home.join("packs/starter/pack.toml");
+    let text = fs::read_to_string(&manifest).expect("starter manifest");
+    fs::write(
+        &manifest,
+        text.replace("audio/commit.wav", "audio/missing.wav"),
+    )
+    .expect("broken audio mapping");
+    let broken = sandbox.tool(None, &["hook", "post-commit"]);
+    assert!(broken.status.success());
+    assert!(sandbox.event_names().is_empty());
+}
+
+#[test]
+fn push_count_failure_falls_back_to_a_normal_push_event() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    sandbox.clear_log();
+    let line = format!(
+        "refs/heads/main {} refs/heads/main {}\n",
+        "a".repeat(40),
+        "0".repeat(40)
+    );
+    let output = sandbox.tool_with_input(&["hook", "pre-push", "origin"], &line);
+    assert!(output.status.success());
+    assert_eq!(sandbox.event_names(), vec!["push"]);
+}
+
+#[test]
+fn corrupted_branch_state_cannot_fail_checkout_hook() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.init_repo("corrupt-state-repo");
+    sandbox.commit(&repo, "base");
+    let repository = repo
+        .join(".git")
+        .canonicalize()
+        .expect("git directory")
+        .to_string_lossy()
+        .into_owned();
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in format!("{repository}\0main").as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    fs::create_dir_all(sandbox.home.join("state")).expect("state");
+    fs::write(
+        sandbox.home.join(format!("state/pending-{hash:016x}.json")),
+        "not json",
+    )
+    .expect("corrupted state");
+
+    let old = "1".repeat(40);
+    let new = "2".repeat(40);
+    let output = sandbox.tool_path(
+        Path::new(env!("CARGO_BIN_EXE_gitsama")),
+        Some(&repo),
+        &["hook", "post-checkout", old.as_str(), new.as_str(), "1"],
+    );
+    assert!(output.status.success());
+}
+
+#[test]
 fn old_git_setup_makes_no_global_hook_changes() {
     if supported_named_hooks() {
         return;

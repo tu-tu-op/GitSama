@@ -40,3 +40,6 @@ Run gitsama status inside the repository. off-here stores local hook enable over
 
 Share only GitSama version, operating system, Git version, and redacted gitsama doctor output. Do not share repository names, private remote URLs, commit messages, credentials, or private pack media.
 
+## Removing GitSama
+
+Use gitsama uninstall for a complete removal. Use gitsama uninstall --keep-data when you want to remove the executable and hooks but keep packs and configuration for a later reinstall.

@@ -143,6 +143,7 @@ gitsama on-here                 Inherit global behavior in this repository
 gitsama doctor                 Check the installation
 gitsama doctor --fix           Repair GitSama-owned configuration
 gitsama uninstall               Remove GitSama and its hooks
+gitsama uninstall --keep-data  Remove hooks and binary, keep packs/config
 ```
 
 Hook and playback commands are internal. They are intentionally hidden from normal help and are only called by Git or GitSama's detached player process.
@@ -261,7 +262,7 @@ gitsama doctor checks Git discovery and version, the binary path, configuration,
 gitsama uninstall
 ```
 
-The command explains the files it will remove, removes GitSama's named global hook entries first, removes its identifiable user PATH entry, and then removes the per-user GitSama directory. It leaves unrelated hooks and repositories alone. Use the command's preserve option if you want to keep packs or configuration for a later reinstall.
+The command explains the files it will remove, removes GitSama's named global hook entries first, removes its identifiable user PATH entry, and then removes the per-user GitSama directory. It leaves unrelated hooks and repositories alone. Use gitsama uninstall --keep-data if you want to remove the hooks and executable while keeping packs or configuration for a later reinstall.
 
 ## Development
 
@@ -311,4 +312,3 @@ Yes, as data-only packs containing media you are legally allowed to use. Use git
 ### Can sound playback stop a commit or push?
 
 No. Hook handling is fail-open and the player is detached. A broken pack, missing file, audio device failure, or counting error cannot block Git.
-

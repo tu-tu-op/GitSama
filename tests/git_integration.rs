@@ -80,7 +80,16 @@ impl Sandbox {
 
     fn init_repo(&self, name: &str) -> PathBuf {
         let path = self._directory.path().join(name);
-        let output = self.git(None, &["init", "--quiet", "-b", "main", path.to_str().expect("path")]);
+        let output = self.git(
+            None,
+            &[
+                "init",
+                "--quiet",
+                "-b",
+                "main",
+                path.to_str().expect("path"),
+            ],
+        );
         assert!(
             output.status.success(),
             "init failed: {}",
@@ -117,7 +126,10 @@ impl Sandbox {
     }
 
     fn commit(&self, repo: &Path, message: &str) {
-        self.git_ok(Some(repo), &["commit", "--quiet", "--allow-empty", "-m", message]);
+        self.git_ok(
+            Some(repo),
+            &["commit", "--quiet", "--allow-empty", "-m", message],
+        );
     }
 
     fn clear_log(&self) {
@@ -162,8 +174,14 @@ fn supported_named_hooks() -> bool {
         return false;
     };
     let mut parts = version.split('.');
-    let major = parts.next().and_then(|part| part.parse::<u32>().ok()).unwrap_or(0);
-    let minor = parts.next().and_then(|part| part.parse::<u32>().ok()).unwrap_or(0);
+    let major = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(0);
     major > 2 || (major == 2 && minor >= 54)
 }
 
@@ -197,7 +215,15 @@ fn push_and_massive_push_are_classified() {
     sandbox.setup();
     let repo = sandbox.init_repo("push-repo");
     let remote = sandbox._directory.path().join("remote.git");
-    sandbox.git_ok(None, &["init", "--bare", "--quiet", remote.to_str().expect("remote")]);
+    sandbox.git_ok(
+        None,
+        &[
+            "init",
+            "--bare",
+            "--quiet",
+            remote.to_str().expect("remote"),
+        ],
+    );
     sandbox.git_ok(
         Some(&repo),
         &["remote", "add", "origin", remote.to_str().expect("remote")],
@@ -297,10 +323,7 @@ fn rebase_fires_and_amend_does_not_fire_rebase() {
     assert!(sandbox.event_names().contains(&"rebase".to_owned()));
 
     sandbox.clear_log();
-    sandbox.git_ok(
-        Some(&repo),
-        &["commit", "--quiet", "--amend", "--no-edit"],
-    );
+    sandbox.git_ok(Some(&repo), &["commit", "--quiet", "--amend", "--no-edit"]);
     assert!(!sandbox.event_names().contains(&"rebase".to_owned()));
 }
 
@@ -336,13 +359,27 @@ fn personal_installations_do_not_cross_talk() {
     let sandbox = Sandbox::new();
     sandbox.setup();
     let remote = sandbox._directory.path().join("shared.git");
-    sandbox.git_ok(None, &["init", "--bare", "--quiet", remote.to_str().expect("remote")]);
+    sandbox.git_ok(
+        None,
+        &[
+            "init",
+            "--bare",
+            "--quiet",
+            remote.to_str().expect("remote"),
+        ],
+    );
 
     let user_b_root = sandbox._directory.path().join("user-b");
     fs::create_dir_all(&user_b_root).expect("user b");
     let user_b_repo = user_b_root.join("repo");
     let mut init_b = Command::new("git");
-    init_b.args(["init", "--quiet", "-b", "main", user_b_repo.to_str().expect("repo")]);
+    init_b.args([
+        "init",
+        "--quiet",
+        "-b",
+        "main",
+        user_b_repo.to_str().expect("repo"),
+    ]);
     init_b
         .env("GIT_CONFIG_GLOBAL", user_b_root.join("gitconfig"))
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -350,13 +387,9 @@ fn personal_installations_do_not_cross_talk() {
         .env("USERPROFILE", &user_b_root);
     assert!(init_b.output().expect("init b").status.success());
     let mut commit_b = Command::new("git");
-    commit_b.current_dir(&user_b_repo).args([
-        "commit",
-        "--quiet",
-        "--allow-empty",
-        "-m",
-        "user b",
-    ]);
+    commit_b
+        .current_dir(&user_b_repo)
+        .args(["commit", "--quiet", "--allow-empty", "-m", "user b"]);
     commit_b
         .env("GIT_CONFIG_GLOBAL", user_b_root.join("gitconfig"))
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -421,7 +454,11 @@ fn configured_hook_commands_work_from_a_path_with_spaces() {
     let sandbox = Sandbox::new();
     let spaced = sandbox._directory.path().join("Git Sama Test").join("bin");
     fs::create_dir_all(&spaced).expect("spaced binary directory");
-    let binary_name = if cfg!(windows) { "gitsama.exe" } else { "gitsama" };
+    let binary_name = if cfg!(windows) {
+        "gitsama.exe"
+    } else {
+        "gitsama"
+    };
     let binary = spaced.join(binary_name);
     fs::copy(env!("CARGO_BIN_EXE_gitsama"), &binary).expect("copy binary");
     let setup = sandbox.tool_path(&binary, None, &["setup"]);
@@ -429,7 +466,12 @@ fn configured_hook_commands_work_from_a_path_with_spaces() {
 
     let config = sandbox.git(
         None,
-        &["config", "--global", "--get", "hook.gitsama-post-commit.command"],
+        &[
+            "config",
+            "--global",
+            "--get",
+            "hook.gitsama-post-commit.command",
+        ],
     );
     let command = String::from_utf8_lossy(&config.stdout);
     assert!(command.contains("Git Sama Test"));

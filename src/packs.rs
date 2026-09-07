@@ -118,7 +118,7 @@ pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
     paths.ensure_layout()?;
     let root = paths.packs.join(STARTER_ID);
     let manifest_path = root.join("pack.toml");
-    if manifest_path.exists() {
+    if manifest_path.exists() && Pack::load(&root).is_ok() {
         return Ok(());
     }
 
@@ -517,7 +517,7 @@ mod tests {
     use super::{
         PACK_SCHEMA_VERSION, PackManifest, safe_relative_path, slugify, validate, validate_manifest,
     };
-    use crate::events::EventKind;
+    use crate::{events::EventKind, paths::AppPaths};
 
     fn manifest(path: &str) -> PackManifest {
         let mut events = BTreeMap::new();
@@ -596,5 +596,15 @@ mod tests {
         assert_eq!(resolved, EventKind::Push);
         assert!(path.ends_with("push-1.wav") || path.ends_with("push-2.wav"));
         assert!(pack.resolve(EventKind::Merge).is_none());
+    }
+
+    #[test]
+    fn repairs_a_damaged_starter_pack() {
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join(".gitsama"));
+        super::ensure_starter(&paths).expect("starter");
+        fs::remove_file(paths.packs.join("starter/audio/commit.wav")).expect("remove tone");
+        super::ensure_starter(&paths).expect("repair starter");
+        assert!(super::find(&paths, "starter").is_ok());
     }
 }

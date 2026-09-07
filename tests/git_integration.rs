@@ -157,6 +157,12 @@ impl Sandbox {
         );
     }
 
+    fn commit_file(&self, repo: &Path, file: &str, contents: &str) {
+        fs::write(repo.join(file), contents).expect("write fixture file");
+        self.git_ok(Some(repo), &["add", file]);
+        self.commit(repo, file);
+    }
+
     fn clear_log(&self) {
         // Detached branch workers must finish before the next action starts.
         self.wait_for_events(0);
@@ -365,10 +371,12 @@ fn merge_and_failed_merge_behave_correctly() {
     fs::write(repo.join("conflict.txt"), "right\n").expect("right file");
     sandbox.git_ok(Some(&repo), &["add", "conflict.txt"]);
     sandbox.commit(&repo, "right");
-    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "main"]);
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "left"]);
     sandbox.clear_log();
     let failed = sandbox.git(Some(&repo), &["merge", "--no-commit", "right"]);
     assert!(!failed.status.success());
+    let unmerged = sandbox.git_ok(Some(&repo), &["ls-files", "--unmerged"]);
+    assert!(String::from_utf8_lossy(&unmerged.stdout).contains("conflict.txt"));
     assert!(!sandbox.event_names().contains(&"merge".to_owned()));
     sandbox.git_ok(Some(&repo), &["merge", "--abort"]);
 }
@@ -419,19 +427,20 @@ fn rebase_fires_and_amend_does_not_fire_rebase() {
     let sandbox = Sandbox::new();
     sandbox.setup();
     let repo = sandbox.init_repo("rewrite-repo");
-    sandbox.commit(&repo, "base");
+    sandbox.commit_file(&repo, "base.txt", "base\n");
     sandbox.git_ok(Some(&repo), &["switch", "--quiet", "-c", "feature"]);
-    sandbox.commit(&repo, "feature");
+    sandbox.commit_file(&repo, "feature.txt", "feature\n");
     sandbox.git_ok(Some(&repo), &["switch", "--quiet", "main"]);
-    sandbox.commit(&repo, "main");
+    sandbox.commit_file(&repo, "main.txt", "main\n");
     sandbox.git_ok(Some(&repo), &["switch", "--quiet", "feature"]);
     sandbox.clear_log();
     sandbox.git_ok(Some(&repo), &["rebase", "main"]);
-    assert!(sandbox.event_names().contains(&"rebase".to_owned()));
+    let events = sandbox.wait_for_events(1);
+    assert_eq!(events.iter().filter(|event| *event == "rebase").count(), 1);
 
     sandbox.clear_log();
     sandbox.git_ok(Some(&repo), &["commit", "--quiet", "--amend", "--no-edit"]);
-    assert!(!sandbox.event_names().contains(&"rebase".to_owned()));
+    assert_eq!(sandbox.wait_for_events(1), vec!["commit"]);
 }
 
 #[test]

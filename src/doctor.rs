@@ -72,7 +72,14 @@ pub fn run(fix: bool) -> Result<()> {
 
     match packs::find(&paths, &config.active_pack) {
         Ok(pack) => ok(&format!("Active pack valid: {}", pack.manifest.name)),
-        Err(error) => warn(&format!("Active pack invalid: {error}")),
+        Err(error) => {
+            warn(&format!("Active pack invalid: {error}"));
+            if fix {
+                config.active_pack = "starter".to_owned();
+                config.save(&paths)?;
+                ok("Active pack reset to Starter");
+            }
+        }
     }
 
     if audio::test_mode() {

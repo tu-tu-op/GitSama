@@ -43,7 +43,6 @@ else
     Linux:x86_64|Linux:amd64) ASSET="gitsama-v$VERSION-linux-x86_64.tar.gz" ;;
     Darwin:x86_64|Darwin:amd64) ASSET="gitsama-v$VERSION-macos-x86_64.tar.gz" ;;
     Darwin:arm64|Darwin:aarch64) ASSET="gitsama-v$VERSION-macos-aarch64.tar.gz" ;;
-    Linux:arm64|Linux:aarch64) ASSET="gitsama-v$VERSION-linux-aarch64.tar.gz" ;;
     *)
       echo "No release asset is available for $OS_NAME/$ARCH_NAME." >&2
       echo "Install Rust and Cargo, then run install.sh again." >&2

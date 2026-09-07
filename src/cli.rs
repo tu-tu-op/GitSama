@@ -128,7 +128,13 @@ pub fn run() -> Result<()> {
         Some(Command::Play { event }) => {
             let paths = AppPaths::discover()?;
             let config = Config::load_or_default(&paths);
-            audio::play(&paths, &config, EventKind::parse(&event)?)
+            match audio::play(&paths, &config, EventKind::parse(&event)?) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    audio::log_playback_error(&paths, &error);
+                    Ok(())
+                }
+            }
         }
         Some(Command::DispatchPending { repository, branch }) => {
             hooks::run_pending_fail_open(&repository, &branch)
@@ -184,7 +190,7 @@ fn setup() -> Result<()> {
         Ok(version) if version.is_supported() => version,
         Ok(version) => {
             print_old_git(&version.short());
-            return Ok(());
+            return Err(Error::UnsupportedGit(version.short()));
         }
         Err(error) => {
             println!("GitSama could not find a usable Git installation.");

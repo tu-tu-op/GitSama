@@ -663,8 +663,12 @@ fn old_git_setup_makes_no_global_hook_changes() {
     }
     let sandbox = Sandbox::new();
     let output = sandbox.tool(None, &["setup"]);
-    assert!(output.status.success());
-    let message = String::from_utf8_lossy(&output.stdout);
+    assert!(!output.status.success());
+    let message = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(message.contains("GitSama needs Git 2.54 or newer"));
     assert!(!sandbox.global_config.exists());
 }

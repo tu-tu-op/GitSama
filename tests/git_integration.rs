@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
     process::{Command, Output},
     thread,
@@ -50,6 +51,20 @@ impl Sandbox {
             command.current_dir(directory);
         }
         command.output().expect("run gitsama")
+    }
+
+    fn tool_with_input(&self, args: &[&str], input: &str) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_gitsama"));
+        command.args(args).stdin(std::process::Stdio::piped());
+        self.apply_env(&mut command);
+        let mut child = command.spawn().expect("spawn gitsama");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(input.as_bytes())
+            .expect("write hook input");
+        child.wait_with_output().expect("wait gitsama")
     }
 
     fn apply_env(&self, command: &mut Command) {
@@ -479,4 +494,72 @@ fn configured_hook_commands_work_from_a_path_with_spaces() {
     let repo = sandbox.init_repo("spaced-hook-repo");
     sandbox.commit(&repo, "spaced path");
     assert_eq!(sandbox.event_names(), vec!["commit"]);
+}
+
+#[test]
+fn custom_pack_scaffold_import_select_and_test_workflow() {
+    let sandbox = Sandbox::new();
+    let parent = sandbox._directory.path().join("pack-work");
+    fs::create_dir_all(&parent).expect("pack parent");
+    sandbox.tool_ok(None, &["test", "commit"]);
+    sandbox.clear_log();
+
+    let scaffold = sandbox.tool(
+        None,
+        &[
+            "pack",
+            "scaffold",
+            "Custom Pack",
+            parent.to_str().expect("parent"),
+        ],
+    );
+    assert!(scaffold.status.success(), "scaffold failed");
+    let pack = parent.join("custom-pack");
+    let source_audio = sandbox.home.join("packs/starter/audio/commit.wav");
+    let custom_audio = pack.join("audio/commit.wav");
+    fs::copy(source_audio, custom_audio).expect("copy starter tone");
+    let manifest_path = pack.join("pack.toml");
+    let manifest = fs::read_to_string(&manifest_path).expect("manifest");
+    fs::write(
+        &manifest_path,
+        manifest.replace("commit = []", "commit = [\"audio/commit.wav\"]"),
+    )
+    .expect("update manifest");
+
+    sandbox.tool_ok(None, &["pack", "validate", pack.to_str().expect("pack")]);
+    sandbox.tool_ok(None, &["pack", "add", pack.to_str().expect("pack")]);
+    sandbox.tool_ok(None, &["use", "custom-pack"]);
+    sandbox.tool_ok(None, &["test", "commit"]);
+    assert_eq!(sandbox.event_names(), vec!["commit"]);
+}
+
+#[test]
+fn malformed_runtime_state_cannot_fail_a_hook() {
+    let sandbox = Sandbox::new();
+    fs::create_dir_all(&sandbox.home).expect("home");
+    fs::write(&sandbox.home.join("config.toml"), "volume = nope\n").expect("bad config");
+    let output = sandbox.tool(None, &["hook", "post-commit"]);
+    assert!(output.status.success());
+
+    let malformed = sandbox.tool_with_input(
+        &["hook", "pre-push", "origin"],
+        "this is not a valid pre-push line\n",
+    );
+    assert!(malformed.status.success());
+
+    let log_directory = sandbox._directory.path().join("log-directory");
+    fs::create_dir_all(&log_directory).expect("log directory");
+    let mut input = Command::new(env!("CARGO_BIN_EXE_gitsama"));
+    input.args(["hook", "pre-push", "origin"]);
+    input.stdin(std::process::Stdio::piped());
+    sandbox.apply_env(&mut input);
+    input.env("GITSAMA_TEST_LOG", &log_directory);
+    let mut child = input.spawn().expect("spawn fail-open hook");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"bad input\n")
+        .expect("write input");
+    assert!(child.wait().expect("wait").success());
 }

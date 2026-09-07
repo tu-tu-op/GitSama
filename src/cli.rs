@@ -383,8 +383,10 @@ fn packs_picker() -> Result<()> {
         println!("  {marker} {} ({})", pack.manifest.name, pack.manifest.id);
     }
     if interactive() {
-        if let Some(id) = prompt_optional("Choose a pack id (Enter goes back): ")? {
-            use_pack(&id)?;
+        if let Some(id) = prompt_optional("Choose a pack id (or q to go back): ")? {
+            if !id.eq_ignore_ascii_case("q") {
+                use_pack(&id)?;
+            }
         }
     }
     Ok(())
@@ -454,6 +456,9 @@ fn test_command(value: Option<&str>) -> Result<()> {
             }
             println!("  9. Play All");
             let answer = prompt_line("Choice [1-9]: ")?;
+            if answer.eq_ignore_ascii_case("q") {
+                return Ok(());
+            }
             if answer.trim() == "9" {
                 "all".to_owned()
             } else {

@@ -1,0 +1,391 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::{Command, Output},
+    thread,
+    time::Duration,
+};
+
+use serde_json::Value;
+use tempfile::{TempDir, tempdir};
+
+struct Sandbox {
+    _directory: TempDir,
+    home: PathBuf,
+    global_config: PathBuf,
+    log: PathBuf,
+}
+
+impl Sandbox {
+    fn new() -> Self {
+        let directory = tempdir().expect("temporary test directory");
+        let root = directory.path().to_path_buf();
+        Self {
+            _directory: directory,
+            home: root.join("gitsama-home"),
+            global_config: root.join("gitconfig"),
+            log: root.join("events.jsonl"),
+        }
+    }
+
+    fn git(&self, directory: Option<&Path>, args: &[&str]) -> Output {
+        let mut command = Command::new("git");
+        command.args(args);
+        self.apply_env(&mut command);
+        if let Some(directory) = directory {
+            command.current_dir(directory);
+        }
+        command.output().expect("run git")
+    }
+
+    fn tool(&self, directory: Option<&Path>, args: &[&str]) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_gitsama"));
+        command.args(args);
+        self.apply_env(&mut command);
+        if let Some(directory) = directory {
+            command.current_dir(directory);
+        }
+        command.output().expect("run gitsama")
+    }
+
+    fn apply_env(&self, command: &mut Command) {
+        let root = self._directory.path();
+        command
+            .env("GITSAMA_HOME", &self.home)
+            .env("GITSAMA_TEST_MODE", "1")
+            .env("GITSAMA_TEST_LOG", &self.log)
+            .env("GIT_CONFIG_GLOBAL", &self.global_config)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("HOME", root)
+            .env("USERPROFILE", root)
+            .env("GIT_AUTHOR_NAME", "GitSama Test")
+            .env("GIT_AUTHOR_EMAIL", "gitsama-test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "GitSama Test")
+            .env("GIT_COMMITTER_EMAIL", "gitsama-test@example.invalid");
+    }
+
+    fn setup(&self) {
+        let output = self.tool(None, &["setup"]);
+        assert!(
+            output.status.success(),
+            "setup failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_repo(&self, name: &str) -> PathBuf {
+        let path = self._directory.path().join(name);
+        let output = self.git(None, &["init", "--quiet", "-b", "main", path.to_str().expect("path")]);
+        assert!(
+            output.status.success(),
+            "init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        self.git_ok(Some(&path), &["config", "user.name", "GitSama Test"]);
+        self.git_ok(
+            Some(&path),
+            &["config", "user.email", "gitsama-test@example.invalid"],
+        );
+        path
+    }
+
+    fn git_ok(&self, directory: Option<&Path>, args: &[&str]) -> Output {
+        let output = self.git(directory, args);
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+
+    fn tool_ok(&self, directory: Option<&Path>, args: &[&str]) -> Output {
+        let output = self.tool(directory, args);
+        assert!(
+            output.status.success(),
+            "gitsama {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+
+    fn commit(&self, repo: &Path, message: &str) {
+        self.git_ok(Some(repo), &["commit", "--quiet", "--allow-empty", "-m", message]);
+    }
+
+    fn clear_log(&self) {
+        let _ = fs::remove_file(&self.log);
+    }
+
+    fn records(&self) -> Vec<Value> {
+        let Ok(text) = fs::read_to_string(&self.log) else {
+            return Vec::new();
+        };
+        text.lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
+    fn event_names(&self) -> Vec<String> {
+        self.records()
+            .iter()
+            .filter_map(|record| record["event"].as_str().map(ToOwned::to_owned))
+            .collect()
+    }
+
+    fn wait_for_events(&self, minimum: usize) -> Vec<String> {
+        for _ in 0..20 {
+            let events = self.event_names();
+            if events.len() >= minimum {
+                return events;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        self.event_names()
+    }
+}
+
+fn supported_named_hooks() -> bool {
+    let output = Command::new("git")
+        .args(["--version"])
+        .output()
+        .expect("git version");
+    let text = String::from_utf8_lossy(&output.stdout);
+    let Some(version) = text.split_whitespace().nth(2) else {
+        return false;
+    };
+    let mut parts = version.split('.');
+    let major = parts.next().and_then(|part| part.parse::<u32>().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|part| part.parse::<u32>().ok()).unwrap_or(0);
+    major > 2 || (major == 2 && minor >= 54)
+}
+
+fn skip_if_unsupported() -> bool {
+    if supported_named_hooks() {
+        false
+    } else {
+        eprintln!("skipping configured-hook integration test: Git 2.54+ is required");
+        true
+    }
+}
+
+#[test]
+fn commit_hook_dispatches_one_event() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("commit-repo");
+    sandbox.commit(&repo, "ignored by test log");
+    assert_eq!(sandbox.event_names(), vec!["commit"]);
+}
+
+#[test]
+fn push_and_massive_push_are_classified() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("push-repo");
+    let remote = sandbox._directory.path().join("remote.git");
+    sandbox.git_ok(None, &["init", "--bare", "--quiet", remote.to_str().expect("remote")]);
+    sandbox.git_ok(
+        Some(&repo),
+        &["remote", "add", "origin", remote.to_str().expect("remote")],
+    );
+    sandbox.commit(&repo, "base");
+    sandbox.git_ok(Some(&repo), &["push", "--quiet", "-u", "origin", "main"]);
+    assert_eq!(sandbox.event_names(), vec!["commit", "push"]);
+
+    sandbox.clear_log();
+    sandbox.tool_ok(None, &["threshold", "3"]);
+    sandbox.commit(&repo, "one");
+    sandbox.commit(&repo, "two");
+    sandbox.commit(&repo, "three");
+    sandbox.git_ok(Some(&repo), &["push", "--quiet"]);
+    assert!(sandbox.event_names().contains(&"massive_push".to_owned()));
+}
+
+#[test]
+fn merge_and_failed_merge_behave_correctly() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("merge-repo");
+    sandbox.commit(&repo, "base");
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "-c", "feature"]);
+    sandbox.commit(&repo, "feature");
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "main"]);
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["merge", "--quiet", "--no-ff", "feature"]);
+    assert!(sandbox.event_names().contains(&"merge".to_owned()));
+
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "-c", "left"]);
+    fs::write(repo.join("conflict.txt"), "left\n").expect("left file");
+    sandbox.git_ok(Some(&repo), &["add", "conflict.txt"]);
+    sandbox.commit(&repo, "left");
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "main"]);
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "-c", "right"]);
+    fs::write(repo.join("conflict.txt"), "right\n").expect("right file");
+    sandbox.git_ok(Some(&repo), &["add", "conflict.txt"]);
+    sandbox.commit(&repo, "right");
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "main"]);
+    sandbox.clear_log();
+    let failed = sandbox.git(Some(&repo), &["merge", "--no-commit", "right"]);
+    assert!(!failed.status.success());
+    assert!(!sandbox.event_names().contains(&"merge".to_owned()));
+    sandbox.git_ok(Some(&repo), &["merge", "--abort"]);
+}
+
+#[test]
+fn branch_lifecycle_and_create_switch_deduplicate() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("branch-repo");
+    sandbox.commit(&repo, "base");
+
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["branch", "feature"]);
+    let events = sandbox.wait_for_events(1);
+    assert_eq!(events, vec!["branch_create"]);
+
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "feature"]);
+    assert_eq!(sandbox.event_names(), vec!["branch_switch"]);
+
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "-c", "new-feature"]);
+    let events = sandbox.wait_for_events(1);
+    assert_eq!(events, vec!["branch_create"]);
+
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["branch", "-d", "new-feature"]);
+    let events = sandbox.wait_for_events(1);
+    assert_eq!(events, vec!["branch_delete"]);
+}
+
+#[test]
+fn rebase_fires_and_amend_does_not_fire_rebase() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("rewrite-repo");
+    sandbox.commit(&repo, "base");
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "-c", "feature"]);
+    sandbox.commit(&repo, "feature");
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "main"]);
+    sandbox.commit(&repo, "main");
+    sandbox.git_ok(Some(&repo), &["switch", "--quiet", "feature"]);
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&repo), &["rebase", "main"]);
+    assert!(sandbox.event_names().contains(&"rebase".to_owned()));
+
+    sandbox.clear_log();
+    sandbox.git_ok(
+        Some(&repo),
+        &["commit", "--quiet", "--amend", "--no-edit"],
+    );
+    assert!(!sandbox.event_names().contains(&"rebase".to_owned()));
+}
+
+#[test]
+fn clone_initialization_does_not_sound_like_a_switch() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let source = sandbox.init_repo("clone-source");
+    sandbox.commit(&source, "source");
+    let clone = sandbox._directory.path().join("clone-destination");
+    sandbox.clear_log();
+    sandbox.git_ok(
+        None,
+        &[
+            "clone",
+            "--quiet",
+            source.to_str().expect("source"),
+            clone.to_str().expect("clone"),
+        ],
+    );
+    thread::sleep(Duration::from_millis(200));
+    assert!(!sandbox.event_names().contains(&"branch_switch".to_owned()));
+}
+
+#[test]
+fn personal_installations_do_not_cross_talk() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let remote = sandbox._directory.path().join("shared.git");
+    sandbox.git_ok(None, &["init", "--bare", "--quiet", remote.to_str().expect("remote")]);
+
+    let user_b_root = sandbox._directory.path().join("user-b");
+    fs::create_dir_all(&user_b_root).expect("user b");
+    let user_b_repo = user_b_root.join("repo");
+    let mut init_b = Command::new("git");
+    init_b.args(["init", "--quiet", "-b", "main", user_b_repo.to_str().expect("repo")]);
+    init_b
+        .env("GIT_CONFIG_GLOBAL", user_b_root.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("HOME", &user_b_root)
+        .env("USERPROFILE", &user_b_root);
+    assert!(init_b.output().expect("init b").status.success());
+    let mut commit_b = Command::new("git");
+    commit_b.current_dir(&user_b_repo).args([
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "user b",
+    ]);
+    commit_b
+        .env("GIT_CONFIG_GLOBAL", user_b_root.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("HOME", &user_b_root)
+        .env("USERPROFILE", &user_b_root)
+        .env("GIT_AUTHOR_NAME", "B")
+        .env("GIT_AUTHOR_EMAIL", "b@example.invalid")
+        .env("GIT_COMMITTER_NAME", "B")
+        .env("GIT_COMMITTER_EMAIL", "b@example.invalid");
+    assert!(commit_b.output().expect("commit b").status.success());
+    assert!(sandbox.event_names().is_empty());
+}
+
+#[test]
+fn repository_opt_out_is_local_only() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo_a = sandbox.init_repo("repo-a");
+    let repo_b = sandbox.init_repo("repo-b");
+
+    sandbox.tool_ok(Some(&repo_a), &["off-here"]);
+    sandbox.commit(&repo_a, "muted here");
+    assert!(sandbox.event_names().is_empty());
+
+    sandbox.commit(&repo_b, "still on");
+    assert_eq!(sandbox.event_names(), vec!["commit"]);
+
+    sandbox.clear_log();
+    sandbox.tool_ok(Some(&repo_a), &["on-here"]);
+    sandbox.commit(&repo_a, "on again");
+    assert_eq!(sandbox.event_names(), vec!["commit"]);
+}
+

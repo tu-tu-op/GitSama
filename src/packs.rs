@@ -56,7 +56,10 @@ impl Pack {
             source,
         })?;
         if !root.is_dir() {
-            return Err(Error::Pack(format!("{} is not a directory", root.display())));
+            return Err(Error::Pack(format!(
+                "{} is not a directory",
+                root.display()
+            )));
         }
 
         let manifest_path = root.join("pack.toml");
@@ -221,7 +224,9 @@ pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {
         return Err(Error::Pack(format!("pack '{id}' is not installed")));
     }
     if !destination.is_dir() || !destination.starts_with(&paths.packs) {
-        return Err(Error::Pack("refusing to remove an unsafe pack path".to_owned()));
+        return Err(Error::Pack(
+            "refusing to remove an unsafe pack path".to_owned(),
+        ));
     }
     fs::remove_dir_all(&destination).map_err(|source| Error::WriteFile {
         path: destination,
@@ -295,14 +300,18 @@ pub fn slugify(name: &str) -> String {
     for character in name.trim().chars() {
         if character.is_ascii_alphanumeric() {
             slug.push(character.to_ascii_lowercase());
-        } else if (character == '-' || character == '_') && !slug.ends_with(character) {
+        } else if character == '-' || character == '_' {
             slug.push(character);
         } else if !slug.ends_with('-') && !slug.is_empty() {
             slug.push('-');
         }
     }
     let slug = slug.trim_matches('-').to_owned();
-    if slug.is_empty() { "pack".to_owned() } else { slug }
+    if slug.is_empty() {
+        "pack".to_owned()
+    } else {
+        slug
+    }
 }
 
 fn validate_manifest(manifest: &PackManifest) -> Result<()> {
@@ -333,9 +342,12 @@ fn validate_manifest(manifest: &PackManifest) -> Result<()> {
 fn validate_id(id: &str) -> Result<()> {
     if id.is_empty()
         || id.len() > 64
-        || !id
-            .chars()
-            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-' || character == '_')
+        || !id.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || character == '-'
+                || character == '_'
+        })
         || id.starts_with('-')
     {
         return Err(Error::Pack(format!(
@@ -351,11 +363,13 @@ fn validate_audio_files(root: &Path, manifest: &PackManifest) -> Result<()> {
         for relative in files {
             let relative_path = safe_relative_path(relative)?;
             let path = root.join(relative_path);
-            let metadata = fs::symlink_metadata(&path).map_err(|source| Error::Pack(format!(
-                "{} for event {}: {source}",
-                path.display(),
-                event.as_str()
-            )))?;
+            let metadata = fs::symlink_metadata(&path).map_err(|source| {
+                Error::Pack(format!(
+                    "{} for event {}: {source}",
+                    path.display(),
+                    event.as_str()
+                ))
+            })?;
             if metadata.file_type().is_symlink() {
                 return Err(Error::Pack(format!(
                     "symlink audio path is not allowed: {}",
@@ -492,7 +506,7 @@ mod tests {
     use std::{collections::BTreeMap, fs};
 
     use super::{
-        PackManifest, PACK_SCHEMA_VERSION, safe_relative_path, slugify, validate, validate_manifest,
+        PACK_SCHEMA_VERSION, PackManifest, safe_relative_path, slugify, validate, validate_manifest,
     };
     use crate::events::EventKind;
 
@@ -549,6 +563,9 @@ mod tests {
     fn slugifies_pack_names() {
         assert_eq!(slugify("Pain Arc"), "pain-arc");
         assert_eq!(slugify("  My__Pack  "), "my__pack");
-        assert_eq!(EventKind::parse("branch-create").expect("event"), EventKind::BranchCreate);
+        assert_eq!(
+            EventKind::parse("branch-create").expect("event"),
+            EventKind::BranchCreate
+        );
     }
 }

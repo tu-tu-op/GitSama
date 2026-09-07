@@ -91,6 +91,10 @@ impl Pack {
             event
         };
 
+        if candidates.is_empty() {
+            return None;
+        }
+
         candidates
             .get(random_range(0..candidates.len()))
             .cloned()
@@ -548,4 +552,3 @@ mod tests {
         assert_eq!(EventKind::parse("branch-create").expect("event"), EventKind::BranchCreate);
     }
 }
-

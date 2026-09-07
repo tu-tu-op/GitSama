@@ -117,6 +117,22 @@ impl Pack {
 pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
     paths.ensure_layout()?;
     let root = paths.packs.join(STARTER_ID);
+    match fs::symlink_metadata(&root) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(Error::Pack(format!(
+                "Starter pack root cannot be a symlink: {}",
+                root.display()
+            )));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(Error::ReadFile {
+                path: root.clone(),
+                source,
+            });
+        }
+    }
     let manifest_path = root.join("pack.toml");
     if manifest_path.exists() && Pack::load(&root).is_ok() {
         return Ok(());
@@ -211,7 +227,7 @@ pub fn install(paths: &AppPaths, source: impl AsRef<Path>) -> Result<PackSummary
     let source_pack = Pack::load(source)?;
     paths.ensure_layout()?;
     let destination = paths.packs.join(&source_pack.manifest.id);
-    if destination.exists() {
+    if fs::symlink_metadata(&destination).is_ok() {
         return Err(Error::Pack(format!(
             "pack '{}' is already installed; remove it before importing an update",
             source_pack.manifest.id
@@ -229,10 +245,17 @@ pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {
         ));
     }
     let destination = paths.packs.join(id);
-    if !destination.exists() {
-        return Err(Error::Pack(format!("pack '{id}' is not installed")));
-    }
-    if !destination.is_dir() || !destination.starts_with(&paths.packs) {
+    let metadata = fs::symlink_metadata(&destination).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Error::Pack(format!("pack '{id}' is not installed"))
+        } else {
+            Error::ReadFile {
+                path: destination.clone(),
+                source: error,
+            }
+        }
+    })?;
+    if !metadata.is_dir() || !destination.starts_with(&paths.packs) {
         return Err(Error::Pack(
             "refusing to remove an unsafe pack path".to_owned(),
         ));
@@ -253,7 +276,7 @@ pub fn scaffold(name: &str, parent: impl AsRef<Path>) -> Result<PathBuf> {
     let id = slugify(name);
     let parent = parent.as_ref();
     let root = parent.join(&id);
-    if root.exists() {
+    if fs::symlink_metadata(&root).is_ok() {
         return Err(Error::Pack(format!(
             "destination {} already exists",
             root.display()
@@ -349,21 +372,24 @@ fn validate_manifest(manifest: &PackManifest) -> Result<()> {
 }
 
 fn validate_id(id: &str) -> Result<()> {
-    if id.is_empty()
-        || id.len() > 64
-        || !id.chars().all(|character| {
-            character.is_ascii_lowercase()
-                || character.is_ascii_digit()
-                || character == '-'
-                || character == '_'
-        })
-        || id.starts_with('-')
-    {
+    if !is_valid_id(id) {
         return Err(Error::Pack(format!(
             "id '{id}' must use lowercase letters, digits, '-' or '_', and cannot start with '-'"
         )));
     }
     Ok(())
+}
+
+pub fn is_valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || character == '-'
+                || character == '_'
+        })
+        && !id.starts_with('-')
 }
 
 fn validate_audio_files(root: &Path, manifest: &PackManifest) -> Result<()> {

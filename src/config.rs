@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::{Error, Result},
     events::EventKind,
-    logging,
+    logging, packs,
     paths::AppPaths,
 };
 
@@ -84,6 +84,11 @@ impl Config {
         }
         if self.active_pack.trim().is_empty() {
             return Err(Error::Config("active_pack cannot be empty".to_owned()));
+        }
+        if !packs::is_valid_id(&self.active_pack) {
+            return Err(Error::Config(
+                "active_pack must use a safe installed pack id".to_owned(),
+            ));
         }
         if self.volume > 100 {
             return Err(Error::Config("volume must be between 0 and 100".to_owned()));
@@ -234,6 +239,7 @@ mod tests {
         assert!(Config::parse("volume = 101").is_err());
         assert!(Config::parse("massive_push_threshold = 0").is_err());
         assert!(Config::parse(&format!("schema_version = {}", CONFIG_SCHEMA_VERSION + 1)).is_err());
+        assert!(Config::parse("active_pack = '../outside'").is_err());
     }
 
     #[test]

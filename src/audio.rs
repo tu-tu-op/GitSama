@@ -4,6 +4,10 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -104,15 +108,21 @@ fn resolve_enabled(
     pack: &packs::Pack,
     requested: EventKind,
 ) -> Option<(EventKind, PathBuf)> {
-    if config.is_event_enabled(requested) {
-        if let Some(resolved) = pack.resolve(requested) {
-            return Some(resolved);
+    if requested == EventKind::MassivePush {
+        if config.is_event_enabled(EventKind::MassivePush)
+            && !pack.files_for(EventKind::MassivePush).is_empty()
+        {
+            return pack.resolve(EventKind::MassivePush);
         }
+        if config.is_event_enabled(EventKind::Push) {
+            return pack.resolve(EventKind::Push);
+        }
+        return None;
     }
-    if requested == EventKind::MassivePush && config.is_event_enabled(EventKind::Push) {
-        return pack.resolve(EventKind::MassivePush);
-    }
-    None
+    config
+        .is_event_enabled(requested)
+        .then(|| pack.resolve(requested))
+        .flatten()
 }
 
 pub fn probe_output() -> Result<()> {
@@ -122,27 +132,40 @@ pub fn probe_output() -> Result<()> {
 }
 
 pub fn test_mode() -> bool {
-    env::var("GITSAMA_TEST_MODE").is_ok_and(|value| value == "1")
+    test_mode_value(env::var("GITSAMA_TEST_MODE").ok().as_deref())
+}
+
+fn test_mode_value(value: Option<&str>) -> bool {
+    value == Some("1")
 }
 
 fn write_test_record(record: &TestRecord) -> Result<()> {
     let path = env::var_os("GITSAMA_TEST_LOG")
         .map(PathBuf::from)
         .ok_or_else(|| Error::Audio("GITSAMA_TEST_LOG is not set".to_owned()))?;
+    write_test_record_to(&path, record)
+}
+
+fn write_test_record_to(path: &Path, record: &TestRecord) -> Result<()> {
     let text = serde_json::to_string(record).map_err(|error| Error::Audio(error.to_string()))?;
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
+        .open(path)
         .map_err(|error| Error::WriteFile {
-            path: path.clone(),
+            path: path.to_path_buf(),
             source: error,
         })?;
-    writeln!(file, "{text}").map_err(|source| Error::WriteFile { path, source })
+    writeln!(file, "{text}").map_err(|source| Error::WriteFile {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 struct PlaybackLock {
     path: PathBuf,
+    stop: Arc<AtomicBool>,
+    heartbeat: Option<thread::JoinHandle<()>>,
 }
 
 impl PlaybackLock {
@@ -154,10 +177,16 @@ impl PlaybackLock {
 
         loop {
             match fs::create_dir(&path) {
-                Ok(()) => return Ok(Some(Self { path })),
+                Ok(()) => match Self::start(path.clone()) {
+                    Ok(lock) => return Ok(Some(lock)),
+                    Err(error) => {
+                        let _ = fs::remove_dir_all(&path);
+                        return Err(error);
+                    }
+                },
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     if lock_is_stale(&path, max_age) {
-                        let _ = fs::remove_dir(&path);
+                        let _ = fs::remove_dir_all(&path);
                         continue;
                     }
                     if start.elapsed() >= max_age {
@@ -174,16 +203,64 @@ impl PlaybackLock {
             }
         }
     }
+
+    fn start(path: PathBuf) -> Result<Self> {
+        let heartbeat_path = path.join("heartbeat");
+        if let Err(source) = fs::write(&heartbeat_path, b"active") {
+            let _ = fs::remove_dir_all(&path);
+            return Err(Error::WriteFile {
+                path: heartbeat_path.clone(),
+                source,
+            });
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread_path = heartbeat_path;
+        let thread_path_for_thread = thread_path.clone();
+        let heartbeat = match thread::Builder::new()
+            .name("gitsama-playback-heartbeat".to_owned())
+            .spawn(move || {
+                while !thread_stop.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(250));
+                    if !thread_stop.load(Ordering::Relaxed) {
+                        let _ = OpenOptions::new()
+                            .write(true)
+                            .truncate(true)
+                            .open(&thread_path_for_thread);
+                    }
+                }
+            }) {
+            Ok(heartbeat) => heartbeat,
+            Err(source) => {
+                let _ = fs::remove_file(&thread_path);
+                let _ = fs::remove_dir_all(&path);
+                return Err(Error::Audio(format!(
+                    "could not start playback heartbeat: {source}"
+                )));
+            }
+        };
+        Ok(Self {
+            path,
+            stop,
+            heartbeat: Some(heartbeat),
+        })
+    }
 }
 
 impl Drop for PlaybackLock {
     fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(heartbeat) = self.heartbeat.take() {
+            let _ = heartbeat.join();
+        }
+        let _ = fs::remove_file(self.path.join("heartbeat"));
         let _ = fs::remove_dir(&self.path);
     }
 }
 
 fn lock_is_stale(path: &Path, max_age: Duration) -> bool {
-    fs::metadata(path)
+    fs::metadata(path.join("heartbeat"))
+        .or_else(|_| fs::metadata(path))
         .and_then(|metadata| metadata.modified())
         .ok()
         .and_then(|modified| modified.elapsed().ok())
@@ -196,10 +273,11 @@ pub fn log_playback_error(paths: &AppPaths, error: &Error) {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs};
+    use std::fs;
 
-    use super::{PlaybackLock, test_mode};
+    use super::{PlaybackLock, TestRecord, resolve_enabled, test_mode_value, write_test_record_to};
     use crate::paths::AppPaths;
+    use crate::{config::Config, events::EventKind, packs::Pack};
 
     #[test]
     fn lock_is_released() {
@@ -215,35 +293,57 @@ mod tests {
 
     #[test]
     fn test_mode_requires_explicit_value() {
-        unsafe {
-            env::set_var("GITSAMA_TEST_MODE", "1");
-        }
-        assert!(test_mode());
-        unsafe {
-            env::remove_var("GITSAMA_TEST_MODE");
-        }
+        assert!(test_mode_value(Some("1")));
+        assert!(!test_mode_value(Some("true")));
+        assert!(!test_mode_value(None));
     }
 
     #[test]
     fn starter_test_log_is_jsonl_shaped() {
         let directory = tempfile::tempdir().expect("temp");
         let log = directory.path().join("events.jsonl");
-        unsafe {
-            env::set_var("GITSAMA_TEST_LOG", &log);
-        }
-        super::write_test_record(&super::TestRecord {
-            event: crate::events::EventKind::Commit,
-            branch: None,
-            commit_count: None,
-        })
+        write_test_record_to(
+            &log,
+            &TestRecord {
+                event: crate::events::EventKind::Commit,
+                branch: None,
+                commit_count: None,
+            },
+        )
         .expect("record");
         assert!(
             fs::read_to_string(log)
                 .expect("read")
                 .contains("\"event\":\"commit\"")
         );
-        unsafe {
-            env::remove_var("GITSAMA_TEST_LOG");
-        }
+    }
+
+    #[test]
+    fn disabled_massive_push_uses_enabled_push_clip() {
+        let config = Config::default();
+        let mut config = config;
+        config.events.massive_push = false;
+        let pack = Pack {
+            root: std::path::PathBuf::from("."),
+            manifest: crate::packs::PackManifest {
+                schema_version: 1,
+                id: "starter".to_owned(),
+                name: "Starter".to_owned(),
+                author: "GitSama".to_owned(),
+                version: "1.0.0".to_owned(),
+                description: "test".to_owned(),
+                license: "MIT".to_owned(),
+                events: [("push".to_owned(), vec!["audio/push.wav".to_owned()])]
+                    .into_iter()
+                    .collect(),
+            },
+        };
+        assert_eq!(
+            resolve_enabled(&config, &pack, EventKind::MassivePush).map(|(event, _)| event),
+            Some(EventKind::Push)
+        );
+
+        config.events.push = false;
+        assert!(resolve_enabled(&config, &pack, EventKind::MassivePush).is_none());
     }
 }

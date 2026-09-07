@@ -1,0 +1,19 @@
+schema_version = 1
+
+id = "custom-pack"
+name = "Custom Pack"
+author = "Your Name"
+version = "1.0.0"
+description = "A blank pack template for legally sourced audio."
+license = "user-provided"
+
+[events]
+commit = []
+push = []
+massive_push = []
+merge = []
+branch_switch = []
+branch_create = []
+branch_delete = []
+rebase = []
+

@@ -73,14 +73,14 @@ pub fn classify(refs: &[PushRef], remote_name: &str, threshold: u32) -> Result<P
             && !push_ref.is_deleted()
             && !git::is_zero_oid(&push_ref.local_object_id)
     }) {
-        let mut args = vec![
-            "rev-list".to_owned(),
-            push_ref.local_object_id.clone(),
-            "--not".to_owned(),
-        ];
+        let mut args = vec!["rev-list".to_owned(), push_ref.local_object_id.clone()];
         if git::is_zero_oid(&push_ref.remote_object_id) {
-            args.extend(exclusions.iter().cloned());
+            if !exclusions.is_empty() {
+                args.push("--not".to_owned());
+                args.extend(exclusions.iter().cloned());
+            }
         } else {
+            args.push("--not".to_owned());
             args.push(push_ref.remote_object_id.clone());
         }
 

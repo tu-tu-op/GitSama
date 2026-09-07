@@ -430,7 +430,11 @@ fn test_command(value: Option<&str>) -> Result<()> {
 
 fn test_one(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
     println!("  Playing {}", event.label());
-    audio::play(paths, config, event)
+    if audio::test_mode() {
+        audio::dispatch(paths, config, event, audio::DispatchDetails::default())
+    } else {
+        audio::play(paths, config, event)
+    }
 }
 
 fn set_volume(value: u8) -> Result<()> {

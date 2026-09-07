@@ -143,6 +143,15 @@ pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
         }
     }
     let manifest_path = root.join("pack.toml");
+    if fs::symlink_metadata(&manifest_path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(Error::Pack(format!(
+            "Starter pack manifest cannot be a symlink: {}",
+            manifest_path.display()
+        )));
+    }
     if manifest_path.exists() && Pack::load(&root).is_ok() {
         return Ok(());
     }
@@ -678,5 +687,25 @@ mod tests {
         fs::remove_file(paths.packs.join("starter/audio/commit.wav")).expect("remove tone");
         super::ensure_starter(&paths).expect("repair starter");
         assert!(super::find(&paths, "starter").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn starter_does_not_follow_a_linked_manifest() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join(".gitsama"));
+        let root = paths.packs.join("starter");
+        fs::create_dir_all(root.join("audio")).expect("starter directories");
+        let outside = directory.path().join("outside.toml");
+        fs::write(&outside, "sentinel").expect("outside file");
+        symlink(&outside, root.join("pack.toml")).expect("manifest symlink");
+
+        assert!(super::ensure_starter(&paths).is_err());
+        assert_eq!(
+            fs::read_to_string(outside).expect("outside content"),
+            "sentinel"
+        );
     }
 }

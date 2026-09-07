@@ -242,4 +242,13 @@ mod tests {
         config.set_event_enabled(EventKind::Rebase, false);
         assert!(!config.is_event_enabled(EventKind::Rebase));
     }
+
+    #[test]
+    fn invalid_saved_config_recovers_to_defaults() {
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = crate::paths::AppPaths::from_root(directory.path().join(".gitsama"));
+        std::fs::create_dir_all(&paths.root).expect("root");
+        std::fs::write(&paths.config, "volume = broken").expect("bad config");
+        assert_eq!(Config::load_or_default(&paths), Config::default());
+    }
 }

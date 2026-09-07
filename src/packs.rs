@@ -577,4 +577,24 @@ mod tests {
             EventKind::BranchCreate
         );
     }
+
+    #[test]
+    fn resolves_multiple_files_and_massive_push_fallback() {
+        let directory = tempfile::tempdir().expect("temp");
+        let mut events = BTreeMap::new();
+        events.insert(
+            "push".to_owned(),
+            vec!["audio/push-1.wav".to_owned(), "audio/push-2.wav".to_owned()],
+        );
+        let pack = super::Pack {
+            root: directory.path().to_path_buf(),
+            manifest: manifest("audio/push-1.wav"),
+        };
+        let mut pack = pack;
+        pack.manifest.events = events;
+        let (resolved, path) = pack.resolve(EventKind::MassivePush).expect("push fallback");
+        assert_eq!(resolved, EventKind::Push);
+        assert!(path.ends_with("push-1.wav") || path.ends_with("push-2.wav"));
+        assert!(pack.resolve(EventKind::Merge).is_none());
+    }
 }

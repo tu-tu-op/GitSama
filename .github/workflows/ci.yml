@@ -11,6 +11,9 @@ jobs:
   check:
     name: "Check (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      GITSAMA_REQUIRE_GIT_254: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +36,9 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --check
+
+      - name: Show Git version used by integration tests
+        run: git --version
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features --locked -- -D warnings

@@ -270,8 +270,19 @@ fn skip_if_unsupported() -> bool {
     if supported_named_hooks() {
         false
     } else {
+        assert!(
+            std::env::var("GITSAMA_REQUIRE_GIT_254").as_deref() != Ok("1"),
+            "Git 2.54+ is required for CI: configured-hook integration tests must not be skipped"
+        );
         eprintln!("skipping configured-hook integration test: Git 2.54+ is required");
         true
+    }
+}
+
+#[test]
+fn ci_has_supported_git_for_configured_hooks() {
+    if std::env::var("GITSAMA_REQUIRE_GIT_254").as_deref() == Ok("1") {
+        assert!(supported_named_hooks(), "CI requires Git 2.54 or newer");
     }
 }
 

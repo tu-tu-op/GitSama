@@ -2,6 +2,8 @@
 
 A GitSama pack is a data-only directory. It contains a manifest and audio files; no manifest value is executed.
 
+Fresh installations include the generated Starter pack and the bundled Naruto Voice Pack. The bundled pack is materialized into the user's GitSama data directory on first setup and is selected by default; custom packs remain supported through the normal import commands.
+
 ## Directory layout
 
 ```text
@@ -53,7 +55,7 @@ GitSama decodes WAV, MP3, OGG, and FLAC with its built-in Rust audio stack. A fi
 
 Several files can be listed for one event. GitSama chooses one at random for each event. An event with no mapping is silent. If massive_push has no usable mapping but push does, massive_push falls back to push. This also applies when massive_push is disabled while push remains enabled.
 
-The Starter pack is generated from simple PCM tones on first setup. It contains no anime media and exists for installation checks, development, and CI.
+The Starter pack is generated from simple PCM tones on first setup. It contains no anime media and exists for installation checks, development, and CI. The bundled Naruto Voice Pack is included with permission to redistribute its audio and covers all v1 events.
 
 ## Create a pack
 
@@ -91,4 +93,4 @@ The importer refuses to replace an existing pack. Remove the old pack explicitly
 
 Manifests cannot contain shell commands, executable commands, or remote download instructions. GitSama never executes pack files.
 
-Do not include copyrighted anime dialogue, music, or sound effects in this repository. You can create a local pack from media you are legally allowed to use. A public pack contribution must include permission to redistribute every audio file and clear license information. The GitSama MIT license does not apply automatically to pack audio.
+Do not include copyrighted anime dialogue, music, or sound effects in this repository without permission to redistribute them. You can create a local pack from media you are legally allowed to use. A public pack contribution must include permission to redistribute every audio file and clear license information. The GitSama MIT license does not apply automatically to pack audio.

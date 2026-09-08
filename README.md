@@ -6,7 +6,7 @@ Commit. Push. Merge. Switch branches. GitSama reacts with sounds from your chose
 
 Install it once and keep using Git exactly as you already do. Terminal, VS Code, coding agents — if they use your local Git, GitSama hears the event.
 
-GitSama is a small, offline, open-source Rust CLI. It contains the generic event engine and a generated Starter sound pack. It does not ship copyrighted anime audio. Add your own legally sourced sounds as a pack when you are ready.
+GitSama is a small, offline, open-source Rust CLI. It contains the generic event engine, a generated Starter tone pack, and a bundled Naruto Voice Pack included with permission to redistribute its audio. Add your own legally sourced sounds as a pack when you are ready.
 
 ## Demo
 
@@ -86,7 +86,7 @@ gitsama
 gitsama setup
 gitsama test all
 gitsama packs
-gitsama use starter
+gitsama use naruto
 ```
 
 After setup, keep using Git normally:
@@ -152,6 +152,8 @@ Hook and playback commands are internal. They are intentionally hidden from norm
 
 A pack is a directory containing pack.toml and an audio directory. The pack is data, not executable code. A manifest maps generic GitSama event names to one or more relative audio files.
 
+Fresh installations include the generated Starter pack and the bundled Naruto Voice Pack. The Naruto pack is selected by default; custom packs can be added later with the pack commands below.
+
 ```text
 my-pack/
 ├── pack.toml
@@ -186,7 +188,7 @@ No Rust changes, Git hook changes, or recompilation are needed. Pack paths must 
 
 ### Pack contribution rules
 
-Do not add copyrighted anime clips to this repository. A local pack may contain media you are legally allowed to use. A community pack submission must contain audio the contributor has permission to redistribute and must include clear license or permission information. User-provided pack audio is not automatically covered by GitSama's MIT license.
+Do not add copyrighted anime clips to this repository without documented permission to redistribute them. A local pack may contain media you are legally allowed to use. A community pack submission must contain audio the contributor has permission to redistribute and must include clear license or permission information. User-provided pack audio is not automatically covered by GitSama's MIT license.
 
 ## Per-Repository Disable
 

@@ -15,8 +15,60 @@ use crate::{
 };
 
 pub const PACK_SCHEMA_VERSION: u32 = 1;
+pub const DEFAULT_PACK_ID: &str = "naruto";
 const STARTER_ID: &str = "starter";
 const SUPPORTED_EXTENSIONS: [&str; 4] = ["wav", "mp3", "ogg", "flac"];
+
+#[derive(Clone, Copy)]
+struct BundledAudio {
+    relative_path: &'static str,
+    bytes: &'static [u8],
+}
+
+struct BundledPack {
+    id: &'static str,
+    manifest: &'static str,
+    audio: &'static [BundledAudio],
+}
+
+const BUNDLED_PACKS: &[BundledPack] = &[BundledPack {
+    id: DEFAULT_PACK_ID,
+    manifest: include_str!("../packs/naruto/pack.toml"),
+    audio: &[
+        BundledAudio {
+            relative_path: "audio/commit.mp3",
+            bytes: include_bytes!("../packs/naruto/audio/commit.mp3"),
+        },
+        BundledAudio {
+            relative_path: "audio/push.mp3",
+            bytes: include_bytes!("../packs/naruto/audio/push.mp3"),
+        },
+        BundledAudio {
+            relative_path: "audio/massive-push.mp3",
+            bytes: include_bytes!("../packs/naruto/audio/massive-push.mp3"),
+        },
+        BundledAudio {
+            relative_path: "audio/merge.mp3",
+            bytes: include_bytes!("../packs/naruto/audio/merge.mp3"),
+        },
+        BundledAudio {
+            relative_path: "audio/branch-switch.mp3",
+            bytes: include_bytes!("../packs/naruto/audio/branch-switch.mp3"),
+        },
+        BundledAudio {
+            relative_path: "audio/branch-create.mp3",
+            bytes: include_bytes!("../packs/naruto/audio/branch-create.mp3"),
+        },
+        BundledAudio {
+            relative_path: "audio/branch-delete.mp3",
+            bytes: include_bytes!("../packs/naruto/audio/branch-delete.mp3"),
+        },
+        BundledAudio {
+            relative_path: "audio/rebase.mp3",
+            bytes: include_bytes!("../packs/naruto/audio/rebase.mp3"),
+        },
+    ],
+}];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -213,8 +265,89 @@ pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
     Ok(())
 }
 
+pub fn ensure_bundled(paths: &AppPaths) -> Result<()> {
+    paths.ensure_layout()?;
+    for pack in BUNDLED_PACKS {
+        ensure_bundled_pack(paths, pack)?;
+    }
+    Ok(())
+}
+
+pub fn is_built_in(id: &str) -> bool {
+    id == STARTER_ID || BUNDLED_PACKS.iter().any(|pack| pack.id == id)
+}
+
+fn ensure_bundled_pack(paths: &AppPaths, bundled: &BundledPack) -> Result<()> {
+    let root = paths.packs.join(bundled.id);
+    ensure_directory(&root, "built-in pack root")?;
+
+    let manifest_path = root.join("pack.toml");
+    if fs::symlink_metadata(&manifest_path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(Error::Pack(format!(
+            "built-in pack manifest cannot be a symlink: {}",
+            manifest_path.display()
+        )));
+    }
+    if manifest_path.exists() && Pack::load(&root).is_ok() {
+        return Ok(());
+    }
+
+    let audio = root.join("audio");
+    ensure_directory(&audio, "built-in audio directory")?;
+
+    for asset in bundled.audio {
+        let path = root.join(asset.relative_path);
+        if fs::symlink_metadata(&path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(Error::Pack(format!(
+                "built-in audio file cannot be a symlink: {}",
+                path.display()
+            )));
+        }
+        fs::write(&path, asset.bytes).map_err(|source| Error::WriteFile {
+            path: path.clone(),
+            source,
+        })?;
+    }
+
+    fs::write(&manifest_path, bundled.manifest).map_err(|source| Error::WriteFile {
+        path: manifest_path,
+        source,
+    })?;
+    Pack::load(&root).map(|_| ())
+}
+
+fn ensure_directory(path: &Path, label: &str) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(Error::Pack(format!(
+            "{label} cannot be a symlink: {}",
+            path.display()
+        ))),
+        Ok(metadata) if !metadata.is_dir() => Err(Error::Pack(format!(
+            "{label} is not a directory: {}",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::create_dir_all(path)
+            .map_err(|source| Error::WriteFile {
+                path: path.to_path_buf(),
+                source,
+            }),
+        Err(source) => Err(Error::ReadFile {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
 pub fn installed(paths: &AppPaths) -> Result<Vec<Pack>> {
     ensure_starter(paths)?;
+    ensure_bundled(paths)?;
     let entries = fs::read_dir(&paths.packs).map_err(|source| Error::ReadFile {
         path: paths.packs.clone(),
         source,
@@ -276,10 +409,10 @@ pub fn install(paths: &AppPaths, source: impl AsRef<Path>) -> Result<PackSummary
 
 pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {
     validate_id(id)?;
-    if id == STARTER_ID {
-        return Err(Error::Pack(
-            "the Starter pack is built in and cannot be removed".to_owned(),
-        ));
+    if is_built_in(id) {
+        return Err(Error::Pack(format!(
+            "the {id} pack is built in and cannot be removed"
+        )));
     }
     let destination = paths.packs.join(id);
     let metadata = fs::symlink_metadata(&destination).map_err(|error| {
@@ -587,7 +720,8 @@ mod tests {
     use std::{collections::BTreeMap, fs};
 
     use super::{
-        PACK_SCHEMA_VERSION, PackManifest, safe_relative_path, slugify, validate, validate_manifest,
+        DEFAULT_PACK_ID, PACK_SCHEMA_VERSION, PackManifest, safe_relative_path, slugify, validate,
+        validate_manifest,
     };
     use crate::{events::EventKind, paths::AppPaths};
 
@@ -687,6 +821,21 @@ mod tests {
         fs::remove_file(paths.packs.join("starter/audio/commit.wav")).expect("remove tone");
         super::ensure_starter(&paths).expect("repair starter");
         assert!(super::find(&paths, "starter").is_ok());
+    }
+
+    #[test]
+    fn installs_and_repairs_the_bundled_default_pack() {
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join(".gitsama"));
+
+        super::ensure_bundled(&paths).expect("bundled pack");
+        let pack = super::find(&paths, DEFAULT_PACK_ID).expect("default pack");
+        assert_eq!(pack.manifest.name, "Naruto Voice Pack");
+        assert_eq!(pack.files_for(EventKind::Commit).len(), 1);
+
+        fs::remove_file(paths.packs.join("naruto/audio/commit.mp3")).expect("remove audio");
+        super::ensure_bundled(&paths).expect("repair bundled pack");
+        assert!(super::find(&paths, DEFAULT_PACK_ID).is_ok());
     }
 
     #[cfg(unix)]

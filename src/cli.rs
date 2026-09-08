@@ -200,16 +200,17 @@ fn setup() -> Result<()> {
     };
 
     packs::ensure_starter(&paths)?;
+    packs::ensure_bundled(&paths)?;
     let mut config = Config::load_or_default(&paths);
     if packs::find(&paths, &config.active_pack).is_err() {
-        config.active_pack = "starter".to_owned();
+        config.active_pack = packs::DEFAULT_PACK_ID.to_owned();
     }
 
     println!("GitSama setup");
     println!();
     println!("✓ Git {}", version.short());
     println!("✓ Git 2.54 named hook system");
-    println!("✓ Starter pack ready");
+    println!("✓ Built-in packs ready");
     if audio::test_mode() {
         println!("✓ Audio test mode enabled");
     } else {
@@ -442,6 +443,8 @@ fn pack_command(command: PackCommand) -> Result<()> {
 
 fn use_pack(id: &str) -> Result<()> {
     let paths = AppPaths::discover()?;
+    packs::ensure_starter(&paths)?;
+    packs::ensure_bundled(&paths)?;
     let pack = packs::find(&paths, id)?;
     let mut config = Config::load_or_default(&paths);
     config.active_pack = pack.manifest.id.clone();
@@ -454,6 +457,7 @@ fn test_command(value: Option<&str>) -> Result<()> {
     let paths = AppPaths::discover()?;
     paths.ensure_layout()?;
     packs::ensure_starter(&paths)?;
+    packs::ensure_bundled(&paths)?;
     let config = Config::load_or_default(&paths);
     let value = match value {
         Some(value) => value.to_owned(),

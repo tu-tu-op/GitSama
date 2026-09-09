@@ -16,7 +16,7 @@ fn default_true() -> bool {
 }
 
 fn default_pack() -> String {
-    "starter".to_owned()
+    packs::DEFAULT_PACK_ID.to_owned()
 }
 
 fn default_volume() -> u8 {

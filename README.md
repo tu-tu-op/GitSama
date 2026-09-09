@@ -1,314 +1,326 @@
-# GitSama ⚔️
+# GitSama
 
-Anime reactions for your Git workflow.
+GitSama plays a sound when something important happens in your local Git workflow, such as a commit, push, merge, branch change, or rebase.
 
-Commit. Push. Merge. Switch branches. GitSama reacts with sounds from your chosen pack.
+Install it once and keep using Git normally. GitSama works below your terminal, editor, or coding agent through Git's configured hooks.
 
-Install it once and keep using Git exactly as you already do. Terminal, VS Code, coding agents — if they use your local Git, GitSama hears the event.
+## Install
 
-GitSama is a small, offline, open-source Rust CLI. It contains the generic event engine and a generated Starter sound pack. It does not ship copyrighted anime audio. Add your own legally sourced sounds as a pack when you are ready.
+GitSama is installed once per user. It does not add files to your repositories.
 
-## Demo
-
-```text
-$ git commit -m "fix auth"
-  commit chime
-
-$ git switch feature
-  branch switch chime
-
-$ git push
-  push chime
-
-73 outgoing commits
-  massive push chime
-```
-
-The demo sounds are simple generated tones so the installation can be tested without downloading media.
-
-## What is GitSama?
-
-GitSama connects your local Git installation to a sound pack. Git reports a supported local event, GitSama turns it into a generic event such as commit or massive_push, and the selected pack supplies the sound.
-
-The engine does not know anime titles, characters, quotes, or franchises. Those meanings live entirely in data-only packs.
-
-## Why GitSama?
-
-Git already gives meaningful moments a name. GitSama makes those moments feel a little more alive without changing how you work. There is no wrapper command to remember, no repository setup for teammates, and no account or service to maintain.
-
-## Local by design
-
-GitSama runs only on your computer.
-
-If your teammate commits or pushes from their computer, GitSama on your computer does nothing.
-
-GitSama does not watch GitHub, remote repositories, or your teammates. It reacts only when your local Git installation performs a supported event.
-
-Installing GitSama never adds files to repositories you collaborate on. Its permanent files live under ~/.gitsama (or %USERPROFILE%/.gitsama on Windows). A repository opt-out uses that clone's local .git/config, which is not committed.
-
-## Requirements
+You need:
 
 - Git 2.54 or newer
 - Windows, macOS, or Linux
-- A normal user account; administrator or root privileges are not required
-- An audio output device for real playback
+- An audio output device for playback
 
-GitSama uses Git's [user-level configured hook system](https://git-scm.com/docs/git-hook/2.54.0.html) introduced for this workflow in Git 2.54. It registers named hooks with absolute commands, so it continues to work when an IDE has a different PATH. It never changes core.hooksPath, replaces .git/hooks/*, or removes an existing hook.
+### Windows PowerShell
 
-If Git is older, setup stops before changing Git configuration and explains the detected version.
-
-## Installation
-
-The simplest source installation is:
-
-```sh
+~~~powershell
 git clone https://github.com/tu-tu-op/GitSama.git
 cd GitSama
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+~~~
+
+The execution-policy option applies only to this PowerShell process. It does not change your permanent Windows policy.
+
+### macOS or Linux
+
+~~~sh
+git clone https://github.com/tu-tu-op/GitSama.git
+cd GitSama
+chmod +x install.sh
 ./install.sh
-```
+~~~
 
-On Windows PowerShell:
+Open a new terminal after installation so the new PATH entry is available.
 
-```powershell
-git clone https://github.com/tu-tu-op/GitSama.git
-cd GitSama
-./install.ps1
-```
+The installer checks your Git version, builds or downloads the correct release binary, installs it in your per-user GitSama directory, adds that directory to your PATH, and registers the Git hooks. Administrator or root access is not required.
 
-The installers use a matching compiled release when one is available. From a source checkout they use an existing release binary or build locally with Cargo. They install the executable to the per-user GitSama bin directory, add that directory to the user PATH when needed, and run gitsama setup.
+## Verify the installation
 
-You can also download a release archive from https://github.com/tu-tu-op/GitSama/releases, place gitsama or gitsama.exe in the per-user bin directory, and run gitsama setup.
+Run these commands in a new terminal:
 
-## Quick Start
-
-```sh
-gitsama
-gitsama setup
+~~~sh
+gitsama --version
+gitsama doctor
+gitsama status
 gitsama test all
-gitsama packs
-gitsama use starter
-```
+~~~
 
-After setup, keep using Git normally:
+gitsama doctor checks Git, the installed binary, sound output, the active pack, and every GitSama hook. gitsama test all plays one sound for each supported event.
 
-```sh
-git commit -m "fix auth"
-git switch feature
-git merge feature
+## Use Git normally
+
+After setup, do not change your Git workflow:
+
+~~~sh
+git status
+git add .
+git commit -m "your message"
+git switch -c feature
 git push
-```
+~~~
 
-Setup is safe to run again. It repairs GitSama's own named hook entries without touching unrelated hooks.
+GitSama reacts automatically when the matching local Git event completes.
 
-## Supported Git Events
+## Common commands
 
-| Git moment | Native hook | GitSama event |
+~~~text
+gitsama                         Show the dashboard
+gitsama help                    Show all commands
+gitsama setup                   Install or repair GitSama hooks
+gitsama status                  Show global and repository status
+gitsama doctor                  Check the installation
+gitsama doctor --fix            Repair GitSama-owned configuration
+gitsama settings                View or edit settings
+gitsama packs                   Choose an installed pack
+gitsama pack list               List installed packs
+gitsama use <id>                Select a pack
+gitsama test [event|all]        Play one event or every event
+gitsama volume <0-100>          Set the volume
+gitsama threshold <number>      Set the massive-push threshold
+gitsama enable <event>          Enable an event
+gitsama disable <event>         Disable an event
+gitsama mute                    Mute playback globally
+gitsama unmute                  Restore playback
+gitsama off-here                Disable GitSama in this repository
+gitsama on-here                 Use the global setting in this repository
+gitsama uninstall               Remove GitSama and its hooks
+gitsama uninstall --keep-data   Remove the binary and hooks but keep data
+~~~
+
+Hook and playback commands are internal. Git and GitSama call them automatically.
+
+## Supported Git events
+
+| Git event | Native hook | Sound event |
 | --- | --- | --- |
 | Successful commit | post-commit | commit |
 | Push starts | pre-push | push or massive_push |
 | Successful merge | post-merge | merge |
 | Branch checkout or switch | post-checkout | branch_switch |
-| Branch created | reference-transaction committed | branch_create |
-| Branch deleted | reference-transaction committed | branch_delete |
-| Rebase rewrite | post-rewrite rebase | rebase |
+| Branch created | reference-transaction | branch_create |
+| Branch deleted | reference-transaction | branch_delete |
+| Rebase rewrite | post-rewrite | rebase |
 
-Push counting uses the ref data Git supplies locally. It does not contact the remote. The default massive push threshold is 50 unique outgoing commits, and counting stops as soon as the threshold is reached. If counting cannot be done safely, GitSama chooses the normal push reaction and lets Git continue.
+GitSama counts outgoing commits locally for a massive push. It does not contact the remote. The default threshold is 50 unique outgoing commits, and counting stops as soon as the threshold is known.
 
-Branch creation takes priority over the checkout event from git switch -c and git checkout -b, so that operation produces one sound. Clone initialization and file checkouts do not produce a misleading branch-switch sound.
+Branch creation takes priority over the checkout event produced by git switch -c and git checkout -b, so those commands produce one sound instead of two. Clone initialization and file checkouts do not produce a misleading branch-switch sound.
 
-## Commands
+## How GitSama works
 
-```text
-gitsama                         Show the friendly dashboard
-gitsama help                    Show command help
-gitsama setup                   Install or repair GitSama hooks
-gitsama status                  Show global and repository status
-gitsama settings                View or edit settings
-gitsama packs                   Interactive pack picker
-gitsama pack list               List installed packs
-gitsama pack add <path>         Import a local pack
-gitsama pack remove <id>        Remove an installed pack
-gitsama pack validate <path>    Validate a pack without importing it
-gitsama pack scaffold <name>    Create a new pack template
-gitsama use <id>                Select the active pack
-gitsama test [event|all]        Play a selected event or every event
-gitsama volume <0-100>          Set volume
-gitsama threshold <number>      Set massive push threshold
-gitsama enable <event>          Enable one event
-gitsama disable <event>         Disable one event
-gitsama mute                   Mute playback globally
-gitsama unmute                 Restore playback
-gitsama off-here                Disable GitSama in this repository
-gitsama on-here                 Inherit global behavior in this repository
-gitsama doctor                 Check the installation
-gitsama doctor --fix           Repair GitSama-owned configuration
-gitsama uninstall               Remove GitSama and its hooks
-gitsama uninstall --keep-data  Remove hooks and binary, keep packs/config
-```
+Git reports a local event to a named Git hook. GitSama converts that event into a generic event, finds the matching sound in the active pack, and starts a short-lived playback process.
 
-Hook and playback commands are internal. They are intentionally hidden from normal help and are only called by Git or GitSama's detached player process.
+The hook process is fail-open. A missing sound, invalid pack, audio error, state error, or counting error cannot block a commit, push, merge, or other Git operation. Playback uses a small cross-process lock so several sounds do not overlap without control.
 
-## Sound Packs
+GitSama uses Git's user-level configured hook system from Git 2.54. It registers named hooks with absolute commands, so Git can find the installed binary even when an IDE has a different PATH. It does not change core.hooksPath, replace .git/hooks/*, or remove existing hooks.
 
-A pack is a directory containing pack.toml and an audio directory. The pack is data, not executable code. A manifest maps generic GitSama event names to one or more relative audio files.
+## Local by design
 
-```text
-my-pack/
-├── pack.toml
-├── README.md
-└── audio/
-    ├── commit.mp3
-    ├── push.mp3
-    ├── massive-push.mp3
-    ├── merge.mp3
-    ├── branch-create.mp3
-    ├── branch-delete.mp3
-    ├── branch-switch.mp3
-    └── rebase.mp3
-```
+GitSama runs on your computer only:
 
-A pack may provide several files for one event; GitSama chooses one at random. An absent event is silent. If massive_push is absent while push exists and is enabled, the normal push sound is used as a fallback.
+- It does not watch GitHub or remote repositories.
+- It does not monitor teammates or other computers.
+- It has no account, server, database, telemetry, analytics, or background network service.
+- It does not send repository names, commit messages, credentials, remote activity, pack usage, or audio anywhere.
+- It does not add files to a project repository.
 
-The supported formats are WAV, MP3, OGG, and FLAC through the built-in audio decoder. See docs/PACKS.md for the complete schema and a copyable template.
+Permanent files are stored in:
 
-### Creating your own pack
+- Windows: %USERPROFILE%\.gitsama
+- macOS and Linux: ~/.gitsama
 
-```sh
-gitsama pack scaffold "Pain Arc"
-# put legally usable audio files in pain-arc/audio/
-gitsama pack validate ./pain-arc
-gitsama pack add ./pain-arc
-gitsama use pain-arc
+The only repository-local setting is the opt-out written by gitsama off-here to that repository's .git/config. It is not committed.
+
+## Sound packs
+
+A sound pack is a data-only directory containing pack.toml and an audio directory. Fresh installations include:
+
+- starter: generated tones used for installation checks, development, and CI
+- naruto: the bundled Naruto Voice Pack, included with permission to redistribute its audio
+
+The Naruto pack is selected by default. GitSama supports WAV, MP3, OGG, and FLAC files. If an event has several files, GitSama chooses one at random. If an event has no sound, it is silent. If massive_push has no usable sound but push does, GitSama falls back to the push sound.
+
+### Create and install a custom pack
+
+~~~sh
+gitsama pack scaffold "My Custom Pack"
+cd my-custom-pack
+# Add legally usable files under audio/ and edit pack.toml.
+gitsama pack validate .
+gitsama pack add .
+gitsama use my-custom-pack
 gitsama test all
-```
+~~~
 
-No Rust changes, Git hook changes, or recompilation are needed. Pack paths must remain inside the pack directory, and manifests cannot contain commands. Import validation rejects absolute paths, traversal, unsafe symlinks, missing files, unsupported extensions, and future schema versions.
+You can create the pack under a different parent directory:
 
-### Pack contribution rules
+~~~sh
+gitsama pack scaffold "My Custom Pack" ./packs
+~~~
 
-Do not add copyrighted anime clips to this repository. A local pack may contain media you are legally allowed to use. A community pack submission must contain audio the contributor has permission to redistribute and must include clear license or permission information. User-provided pack audio is not automatically covered by GitSama's MIT license.
+This creates ./packs/my-custom-pack.
 
-## Per-Repository Disable
+A pack has this general layout:
 
-```sh
+~~~text
+my-pack/
+|-- pack.toml
+|-- README.md
+|-- audio/
+    |-- commit.mp3
+    |-- push.mp3
+    |-- massive-push.mp3
+    |-- merge.mp3
+    |-- branch-create.mp3
+    |-- branch-delete.mp3
+    |-- branch-switch.mp3
+    |-- rebase.mp3
+~~~
+
+The manifest maps generic event names to relative audio paths. It cannot contain commands. Validation rejects absolute paths, parent traversal, unsafe symlinks, missing files, unsupported extensions, and files outside the pack directory. See docs/PACKS.md for the complete manifest schema.
+
+Do not add copyrighted audio to this repository without permission to redistribute it. Local packs may contain media you are legally allowed to use. Every public pack contribution must include permission and license information for its audio.
+
+## Disable GitSama in one repository
+
+Run these commands from inside the repository:
+
+~~~sh
 gitsama off-here
-gitsama on-here
 gitsama status
-```
+gitsama on-here
+~~~
 
-off-here writes only local hook enable overrides to the repository's .git/config. It does not add a working-tree file and does not affect other repositories. on-here removes those local overrides so global behavior is inherited again.
+off-here changes only that repository's local Git configuration. Other repositories are unaffected. on-here restores the global setting.
 
-## How It Works
+## Configuration and data
 
-```text
-Local Git
-   ↓
-Named configured Git hook
-   ↓
-GitSama hook handler
-   ↓
-Generic GitSama event
-   ↓
-Pack resolver
-   ↓
-Detached audio process
-```
+The main configuration file is stored at:
 
-Hook handlers are deliberately fail-open and silent. They consume local hook inputs, dispatch a short-lived player process, and return zero even when configuration, state, pack parsing, counting, or audio output fails. The player uses a small cross-process lock so sounds do not become an uncontrolled wall of overlapping clips. Waiting playback events expire after the configured queue age.
+- Windows: %USERPROFILE%\.gitsama\config.toml
+- macOS and Linux: ~/.gitsama/config.toml
 
-## Works With IDEs and Coding Agents
+Use GitSama commands instead of editing the file directly:
 
-GitSama works below the editor layer:
+~~~sh
+gitsama settings
+gitsama volume 60
+gitsama threshold 25
+gitsama disable rebase
+gitsama mute
+gitsama unmute
+~~~
 
-```text
-VS Code       → Git → GitSama
-Codex         → Git → GitSama
-Claude Code   → Git → GitSama
-Terminal      → Git → GitSama
-JetBrains     → Git → GitSama
-```
-
-Any tool that uses your local Git and allows the relevant Git hooks will trigger GitSama. An operation that bypasses hooks with Git's own bypass options may bypass GitSama too. GitSama is an entertainment tool, not enforcement software.
-
-## Privacy
-
-GitSama has no backend, database, account, authentication, cloud service, telemetry, analytics, GitHub OAuth, or background network service. Runtime behavior is offline. It does not send repository names, commit messages, credentials, remote activity, pack usage, or audio anywhere. GitHub is used only as a release-artifact host for people who choose to download a release.
-
-The diagnostic log is local at ~/.gitsama/logs/gitsama.log. It contains operational errors without commit messages, repository contents, credentials, or secrets.
+The diagnostic log is stored at ~/.gitsama/logs/gitsama.log on macOS and Linux, or %USERPROFILE%\.gitsama\logs\gitsama.log on Windows.
 
 ## Troubleshooting
 
-Run:
+Start with:
 
-```sh
+~~~sh
 gitsama doctor
 gitsama doctor --fix
 gitsama status
-```
+~~~
 
-If a sound is silent, confirm the active pack with gitsama status, validate it with gitsama pack validate, and run gitsama test commit. Check the log path shown by gitsama doctor.
+### gitsama is not found
 
-If setup reports an old Git version, upgrade Git to 2.54 or newer and run gitsama setup again. Setup does not partially install hooks on an unsupported Git version.
+Open a new terminal after installation. If it is still not found, confirm that the per-user GitSama bin directory is on PATH:
 
-If an IDE does not trigger sounds, check whether it uses the same local Git installation and whether the operation bypasses hooks. The hooks are user-level Git configuration, so repository files and core.hooksPath are not involved.
+- Windows: %USERPROFILE%\.gitsama\bin
+- macOS and Linux: ~/.gitsama/bin
 
-## Doctor
+You can run the installed binary directly to confirm that it exists, then open a new terminal and try gitsama --version again.
 
-gitsama doctor checks Git discovery and version, the binary path, configuration, the active pack, audio backend availability, each GitSama named hook, repository opt-out state, and the diagnostic log location. --fix repairs GitSama-owned global configuration only.
+### Setup reports an old Git version
+
+GitSama requires Git 2.54 or newer. Upgrade Git and run:
+
+~~~sh
+gitsama setup
+~~~
+
+GitSama checks the version before changing Git configuration.
+
+### A sound does not play
+
+Check the active pack and audio output:
+
+~~~sh
+gitsama status
+gitsama pack validate <path>
+gitsama test commit
+~~~
+
+Then check the log path reported by gitsama doctor. Playback errors do not stop Git operations.
+
+### An IDE does not trigger sounds
+
+Confirm that the IDE uses the same local Git installation and that the operation does not bypass hooks. GitSama works below the editor layer with VS Code, JetBrains IDEs, terminal tools, and coding agents that use local Git.
 
 ## Uninstall
 
-```sh
+~~~sh
 gitsama uninstall
-```
+~~~
 
-The command explains the files it will remove, removes GitSama's named global hook entries first, removes its identifiable user PATH entry, and then removes the per-user GitSama directory. It leaves unrelated hooks and repositories alone. Use gitsama uninstall --keep-data if you want to remove the hooks and executable while keeping packs or configuration for a later reinstall.
+The uninstall command removes GitSama's named global hooks, its identifiable PATH entry, the executable, and the per-user GitSama directory. It leaves unrelated hooks and repositories alone.
+
+Use this form to remove the executable and hooks while keeping packs and configuration:
+
+~~~sh
+gitsama uninstall --keep-data
+~~~
 
 ## Development
 
-```sh
+From a source checkout:
+
+~~~sh
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo run -- test all
-```
+~~~
 
-Integration tests use temporary repositories and isolated Git configuration. They set GITSAMA_TEST_MODE=1, GITSAMA_TEST_LOG, and GITSAMA_HOME so CI never needs an audio device and never touches a developer's real Git configuration. Tests that exercise Git 2.54 configured hooks report a clear skip when the local Git is older than the supported minimum.
+Integration tests use temporary repositories and isolated Git configuration. They set GITSAMA_TEST_MODE=1, GITSAMA_TEST_LOG, and GITSAMA_HOME so tests do not need a real audio device or modify a developer's Git configuration.
 
-Read docs/ARCHITECTURE.md for design details and CONTRIBUTING.md before opening a pull request.
+Read docs/ARCHITECTURE.md for implementation details, docs/PACKS.md for pack development, and docs/TROUBLESHOOTING.md for additional diagnostics.
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Please include the platform, Git version, GitSama version, and relevant safe gitsama doctor output. Do not include repository names, private URLs, commit messages, credentials, or private audio files.
+Bug reports and pull requests are welcome. Include the platform, Git version, GitSama version, and safe gitsama doctor output. Do not include repository names, private URLs, commit messages, credentials, or private audio files.
 
-Pack contributions must follow the audio licensing rule above. The source code is MIT licensed; pack audio needs its own permission and license information.
-
-## License
-
-GitSama source code is licensed under the MIT License. User-created packs and their audio remain under their own applicable licenses.
+The source code is licensed under MIT. Pack audio needs its own permission and license information.
 
 ## FAQ
 
 ### Does everyone in a repository hear the sounds?
 
-No. GitSama is installed per user. Only local Git operations run through the installation that has GitSama configured can trigger it.
+No. GitSama is installed per user. Only local Git operations performed on a computer with GitSama configured can trigger it.
 
 ### Does GitSama watch GitHub?
 
-No. There is no server, polling, remote monitoring, or GitHub API use.
+No. It has no server, polling, remote monitoring, or GitHub API integration.
 
 ### Does it add files to my project?
 
-No. Permanent files live in the per-user ~/.gitsama directory. The only repository-local setting is an opt-out in .git/config.
+No. Its permanent files live in the per-user GitSama directory. The only repository-local setting is an opt-out in .git/config.
 
 ### Do I need to type gitsama commit?
 
-No. Continue using Git normally.
+No. Continue using normal Git commands.
 
-### Can I add Naruto, JJK, Bleach, Dragon Ball, or meme sounds?
+### Can I add sounds from other anime or games?
 
-Yes, as data-only packs containing media you are legally allowed to use. Use gitsama pack scaffold, add the files, validate, import, select, and test.
+Yes, as a data-only pack containing media you are legally allowed to use. Scaffold, validate, import, select, and test the pack.
 
 ### Can sound playback stop a commit or push?
 
-No. Hook handling is fail-open and the player is detached. A broken pack, missing file, audio device failure, or counting error cannot block Git.
+No. GitSama's hook handling is fail-open and playback is detached. A broken pack, missing file, audio failure, or counting error cannot block Git.
+
+## License
+
+GitSama source code is licensed under the MIT License. User-created packs and their audio remain under their own applicable licenses.

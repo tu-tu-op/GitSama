@@ -1,0 +1,18 @@
+schema_version = 1
+
+id = "naruto"
+name = "Naruto Voice Pack"
+author = "GitSama contributor"
+version = "1.0.0"
+description = "Naruto voice reactions for local Git events."
+license = "user-provided-permission"
+
+[events]
+commit = ["audio/commit.mp3"]
+push = ["audio/push.mp3"]
+massive_push = ["audio/massive-push.mp3"]
+merge = ["audio/merge.mp3"]
+branch_switch = ["audio/branch-switch.mp3"]
+branch_create = ["audio/branch-create.mp3"]
+branch_delete = ["audio/branch-delete.mp3"]
+rebase = ["audio/rebase.mp3"]

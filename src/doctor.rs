@@ -69,15 +69,23 @@ pub fn run(fix: bool) -> Result<()> {
     if let Err(error) = packs::ensure_starter(&paths) {
         warn(&format!("Starter pack unavailable: {error}"));
     }
+    if let Err(error) = packs::ensure_bundled(&paths) {
+        warn(&format!("Built-in packs unavailable: {error}"));
+    }
 
     match packs::find(&paths, &config.active_pack) {
         Ok(pack) => ok(&format!("Active pack valid: {}", pack.manifest.name)),
         Err(error) => {
             warn(&format!("Active pack invalid: {error}"));
             if fix {
-                config.active_pack = "starter".to_owned();
+                let fallback = if packs::find(&paths, packs::DEFAULT_PACK_ID).is_ok() {
+                    packs::DEFAULT_PACK_ID
+                } else {
+                    "starter"
+                };
+                config.active_pack = fallback.to_owned();
                 config.save(&paths)?;
-                ok("Active pack reset to Starter");
+                ok(&format!("Active pack reset to {fallback}"));
             }
         }
     }

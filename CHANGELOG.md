@@ -10,8 +10,8 @@ Initial release:
 - Git 2.54 named configured hooks with coexistence for traditional repository hooks
 - fail-open asynchronous playback with a bounded cross-process queue
 - generated Starter tone pack and data-only custom pack tooling
+- bundled Naruto Voice Pack selected by default for first-run playback
 - pack validation, scaffold, import, selection, and event fallback
 - global mute and event controls
 - repository-local off-here and on-here controls
 - doctor diagnostics, isolated test mode, installers, and release automation
-

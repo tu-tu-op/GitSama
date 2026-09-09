@@ -183,6 +183,37 @@ The manifest maps generic event names to relative audio paths. It cannot contain
 
 Do not add copyrighted audio to this repository without permission to redistribute it. Local packs may contain media you are legally allowed to use. Every public pack contribution must include permission and license information for its audio.
 
+## Open voice-pack contributions
+
+You can share a voice pack with other GitSama users. A pack is data-only: it contains a pack.toml file, audio files, and optional documentation. It does not require Rust changes or a new build.
+
+To contribute a pack to this repository:
+
+1. Create the pack with gitsama pack scaffold.
+2. Add audio that you created or have permission to redistribute.
+3. Set the author, version, description, and license fields in pack.toml.
+4. Add a pack README that explains the audio source and permission or license terms.
+5. Validate the pack and test every event:
+
+   ~~~sh
+   gitsama pack validate ./packs/my-voice-pack
+   gitsama pack add ./packs/my-voice-pack
+   gitsama use my-voice-pack
+   gitsama test all
+   ~~~
+
+6. Add the pack under packs/ and open a pull request. Follow CONTRIBUTING.md for the pull request checklist.
+
+Other users can install a shared pack from a downloaded or cloned pack directory:
+
+~~~sh
+gitsama pack validate ./my-voice-pack
+gitsama pack add ./my-voice-pack
+gitsama use my-voice-pack
+gitsama test all
+~~~
+
+Pack contributors keep responsibility for the rights to their audio. The GitSama MIT license does not automatically apply to voice clips, music, or other pack media.
 ## Disable GitSama in one repository
 
 Run these commands from inside the repository:

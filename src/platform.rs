@@ -117,6 +117,46 @@ pub fn remove_user_path_entry(bin: &Path) -> Result<bool> {
     }
 }
 
+#[cfg(windows)]
+pub fn spawn_detached(command: &mut Command) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    // Break away from any enclosing job object so background workers (audio playback,
+    // pending branch dedup) survive job closure in IDEs, CI runners, and agent sandboxes.
+    command.creation_flags(
+        CREATE_BREAKAWAY_FROM_JOB
+            | DETACHED_PROCESS
+            | CREATE_NEW_PROCESS_GROUP
+            | CREATE_NO_WINDOW,
+    );
+
+    match command.spawn() {
+        Ok(_) => Ok(()),
+        Err(_) => {
+            // Fallback: If the job explicitly forbids breakaway, retry without CREATE_BREAKAWAY_FROM_JOB
+            // while still detaching from the parent console and process group.
+            command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+            command.spawn().map(|_| ())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn spawn_detached(command: &mut Command) -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+
+    // Decouple process group so child does not receive SIGHUP or process group signals
+    // when parent Git runner completes.
+    command.process_group(0);
+    command.spawn().map(|_| ())
+}
+
+
 pub fn schedule_cleanup(executable: &Path, data_root: Option<&Path>) -> Result<()> {
     #[cfg(windows)]
     {
@@ -327,4 +367,21 @@ mod tests {
             "'//server/share/Git Sama/gitsama.exe'"
         );
     }
+
+    #[test]
+    fn spawn_detached_starts_process_cleanly() {
+        let mut command = if cfg!(windows) {
+            let mut cmd = std::process::Command::new("cmd.exe");
+            cmd.args(["/C", "exit 0"]);
+            cmd
+        } else {
+            let cmd = std::process::Command::new("true");
+            cmd
+        };
+        command.stdin(std::process::Stdio::null());
+        command.stdout(std::process::Stdio::null());
+        command.stderr(std::process::Stdio::null());
+        assert!(super::spawn_detached(&mut command).is_ok());
+    }
 }
+

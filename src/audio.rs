@@ -20,7 +20,7 @@ use crate::{
     error::{Error, Result},
     events::EventKind,
     logging, packs,
-    paths::AppPaths,
+    paths::AppPaths, platform,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -73,9 +73,7 @@ pub fn dispatch(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    child
-        .spawn()
-        .map(|_| ())
+    platform::spawn_detached(&mut child)
         .map_err(|error| Error::Audio(format!("could not start detached playback: {error}")))
 }
 
@@ -254,8 +252,9 @@ impl Drop for PlaybackLock {
             let _ = heartbeat.join();
         }
         let _ = fs::remove_file(self.path.join("heartbeat"));
-        let _ = fs::remove_dir(&self.path);
+        let _ = fs::remove_dir_all(&self.path);
     }
+
 }
 
 fn lock_is_stale(path: &Path, max_age: Duration) -> bool {

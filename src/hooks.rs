@@ -407,17 +407,18 @@ fn parse_transaction_line(line: &str) -> Option<(&str, &str, &str)> {
 fn spawn_pending(repository: &str, branch: &str) -> Result<()> {
     let executable = env::current_exe()
         .map_err(|error| Error::Audio(format!("could not locate GitSama: {error}")))?;
-    Command::new(executable)
+    let mut command = Command::new(executable);
+    command
         .arg("__dispatch-pending")
         .arg(repository)
         .arg(branch)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
+        .stderr(Stdio::null());
+    platform::spawn_detached(&mut command)
         .map_err(|error| Error::Audio(format!("could not start pending dispatch: {error}")))
 }
+
 
 fn run_pending(repository: &str, branch: &str) -> Result<()> {
     thread::sleep(Duration::from_millis(BRANCH_DEDUP_DELAY_MS));

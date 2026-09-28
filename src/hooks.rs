@@ -203,6 +203,12 @@ pub fn run_pending_fail_open(repository: &str, branch: &str) -> Result<()> {
 
 fn run_inner(native_event: &str, args: &[String]) -> Result<()> {
     let paths = AppPaths::discover()?;
+    let pid = std::process::id();
+    let job_info = platform::current_job_info();
+    logging::write(
+        &paths,
+        &format!("pid={pid} hook entered: {native_event} args={args:?} [{job_info}]"),
+    );
     let config = Config::load_or_default(&paths);
     match native_event {
         "post-commit" => dispatch(
@@ -416,6 +422,7 @@ fn spawn_pending(repository: &str, branch: &str) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     platform::spawn_detached(&mut command)
+        .map(|_| ())
         .map_err(|error| Error::Audio(format!("could not start pending dispatch: {error}")))
 }
 

@@ -118,7 +118,51 @@ pub fn remove_user_path_entry(bin: &Path) -> Result<bool> {
 }
 
 #[cfg(windows)]
-pub fn spawn_detached(command: &mut Command) -> std::io::Result<()> {
+pub fn current_job_info() -> String {
+    use windows_sys::Win32::System::JobObjects::{
+        IsProcessInJob, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+        JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    unsafe {
+        let mut in_job: i32 = 0;
+        if IsProcessInJob(GetCurrentProcess(), std::ptr::null_mut(), &mut in_job) != 0 {
+            if in_job != 0 {
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                let mut ret_len: u32 = 0;
+                let success = QueryInformationJobObject(
+                    std::ptr::null_mut(),
+                    JobObjectExtendedLimitInformation,
+                    &mut info as *mut _ as *mut _,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                    &mut ret_len,
+                );
+                if success != 0 {
+                    let flags = info.BasicLimitInformation.LimitFlags;
+                    let breakaway = (flags & JOB_OBJECT_LIMIT_BREAKAWAY_OK) != 0;
+                    let silent = (flags & JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK) != 0;
+                    format!("in_job=true breakaway_ok={breakaway} silent_breakaway={silent}")
+                } else {
+                    "in_job=true breakaway_ok=unknown".to_string()
+                }
+            } else {
+                "in_job=false".to_string()
+            }
+        } else {
+            "in_job=unknown".to_string()
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn current_job_info() -> String {
+    "in_job=false".to_string()
+}
+
+#[cfg(windows)]
+pub fn spawn_detached(command: &mut Command) -> std::io::Result<u32> {
     use std::os::windows::process::CommandExt;
 
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
@@ -136,24 +180,24 @@ pub fn spawn_detached(command: &mut Command) -> std::io::Result<()> {
     );
 
     match command.spawn() {
-        Ok(_) => Ok(()),
+        Ok(child) => Ok(child.id()),
         Err(_) => {
             // Fallback: If the job explicitly forbids breakaway, retry without CREATE_BREAKAWAY_FROM_JOB
             // while still detaching from the parent console and process group.
             command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
-            command.spawn().map(|_| ())
+            command.spawn().map(|child| child.id())
         }
     }
 }
 
 #[cfg(not(windows))]
-pub fn spawn_detached(command: &mut Command) -> std::io::Result<()> {
+pub fn spawn_detached(command: &mut Command) -> std::io::Result<u32> {
     use std::os::unix::process::CommandExt;
 
     // Decouple process group so child does not receive SIGHUP or process group signals
     // when parent Git runner completes.
     command.process_group(0);
-    command.spawn().map(|_| ())
+    command.spawn().map(|child| child.id())
 }
 
 

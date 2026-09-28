@@ -73,31 +73,60 @@ pub fn dispatch(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    platform::spawn_detached(&mut child)
-        .map_err(|error| Error::Audio(format!("could not start detached playback: {error}")))
+    let pid = std::process::id();
+    match platform::spawn_detached(&mut child) {
+        Ok(worker_pid) => {
+            logging::write(
+                paths,
+                &format!("pid={pid} worker spawned: {resolved_event} (worker_pid={worker_pid})"),
+            );
+            Ok(())
+        }
+        Err(error) => {
+            logging::write(
+                paths,
+                &format!("pid={pid} worker spawn failed: {resolved_event}: {error}"),
+            );
+            Err(Error::Audio(format!("could not start detached playback: {error}")))
+        }
+    }
 }
 
 pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
+    let pid = std::process::id();
+    let job_info = platform::current_job_info();
+    logging::write(
+        paths,
+        &format!("pid={pid} worker started: {event} [{job_info}]"),
+    );
     if !config.enabled {
+        logging::write(paths, &format!("pid={pid} playback skipped: muted/disabled"));
         return Ok(());
     }
     let pack = packs::find(paths, &config.active_pack)?;
     let Some((_, path)) = pack.resolve(event) else {
+        logging::write(paths, &format!("pid={pid} playback skipped: no sound file in pack"));
         return Ok(());
     };
     let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
+        logging::write(paths, &format!("pid={pid} lock acquire timed out for {event}"));
         return Ok(());
     };
+    logging::write(paths, &format!("pid={pid} lock acquired for {event}"));
 
     let stream = OutputStreamBuilder::open_default_stream()
         .map_err(|error| Error::Audio(error.to_string()))?;
+    logging::write(paths, &format!("pid={pid} audio device opened for {event}"));
+
     let sink = Sink::connect_new(stream.mixer());
     let file = File::open(&path)
         .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
     let decoder = Decoder::try_from(file).map_err(|error| Error::Audio(error.to_string()))?;
     sink.set_volume(f32::from(config.volume) / 100.0);
     sink.append(decoder);
+    logging::write(paths, &format!("pid={pid} first sound started for {event}"));
     sink.sleep_until_end();
+    logging::write(paths, &format!("pid={pid} playback finished for {event}"));
     Ok(())
 }
 
@@ -162,6 +191,7 @@ fn write_test_record_to(path: &Path, record: &TestRecord) -> Result<()> {
 
 struct PlaybackLock {
     path: PathBuf,
+    paths: AppPaths,
     stop: Arc<AtomicBool>,
     heartbeat: Option<thread::JoinHandle<()>>,
 }
@@ -175,7 +205,7 @@ impl PlaybackLock {
 
         loop {
             match fs::create_dir(&path) {
-                Ok(()) => match Self::start(path.clone()) {
+                Ok(()) => match Self::start(paths.clone(), path.clone()) {
                     Ok(lock) => return Ok(Some(lock)),
                     Err(error) => {
                         let _ = fs::remove_dir_all(&path);
@@ -202,7 +232,7 @@ impl PlaybackLock {
         }
     }
 
-    fn start(path: PathBuf) -> Result<Self> {
+    fn start(paths: AppPaths, path: PathBuf) -> Result<Self> {
         let heartbeat_path = path.join("heartbeat");
         if let Err(source) = fs::write(&heartbeat_path, b"active") {
             let _ = fs::remove_dir_all(&path);
@@ -239,6 +269,7 @@ impl PlaybackLock {
         };
         Ok(Self {
             path,
+            paths,
             stop,
             heartbeat: Some(heartbeat),
         })
@@ -253,8 +284,8 @@ impl Drop for PlaybackLock {
         }
         let _ = fs::remove_file(self.path.join("heartbeat"));
         let _ = fs::remove_dir_all(&self.path);
+        logging::write(&self.paths, &format!("pid={} lock released", std::process::id()));
     }
-
 }
 
 fn lock_is_stale(path: &Path, max_age: Duration) -> bool {

@@ -31,6 +31,14 @@ fn default_queue_age() -> u64 {
     5_000
 }
 
+fn default_playback_mode() -> String {
+    "auto".to_owned()
+}
+
+fn default_linger_cap_secs() -> f64 {
+    2.5
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     #[serde(default = "default_schema_version")]
@@ -45,6 +53,10 @@ pub struct Config {
     pub massive_push_threshold: u32,
     #[serde(default = "default_queue_age")]
     pub queue_max_age_ms: u64,
+    #[serde(default = "default_playback_mode")]
+    pub playback_mode: String,
+    #[serde(default = "default_linger_cap_secs")]
+    pub linger_cap_secs: f64,
     #[serde(default)]
     pub events: EventSettings,
 }
@@ -62,6 +74,8 @@ impl Default for Config {
             volume: default_volume(),
             massive_push_threshold: default_threshold(),
             queue_max_age_ms: default_queue_age(),
+            playback_mode: default_playback_mode(),
+            linger_cap_secs: default_linger_cap_secs(),
             events: EventSettings::default(),
         }
     }
@@ -103,7 +117,22 @@ impl Config {
                 "queue_max_age_ms must be greater than 0".to_owned(),
             ));
         }
+        let mode = self.playback_mode.to_ascii_lowercase();
+        if !["auto", "detached", "linger"].contains(&mode.as_str()) {
+            return Err(Error::Config(
+                "playback_mode must be 'auto', 'detached', or 'linger'".to_owned(),
+            ));
+        }
+        if self.linger_cap_secs <= 0.0 || self.linger_cap_secs > 30.0 {
+            return Err(Error::Config(
+                "linger_cap_secs must be between 0.1 and 30.0".to_owned(),
+            ));
+        }
         Ok(())
+    }
+
+    pub fn linger_cap_duration(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(self.linger_cap_secs)
     }
 
     pub fn load_or_default(paths: &AppPaths) -> Self {
@@ -240,6 +269,23 @@ mod tests {
         assert!(Config::parse("massive_push_threshold = 0").is_err());
         assert!(Config::parse(&format!("schema_version = {}", CONFIG_SCHEMA_VERSION + 1)).is_err());
         assert!(Config::parse("active_pack = '../outside'").is_err());
+        assert!(Config::parse("playback_mode = 'invalid'").is_err());
+        assert!(Config::parse("linger_cap_secs = 0.0").is_err());
+        assert!(Config::parse("linger_cap_secs = 35.0").is_err());
+    }
+
+    #[test]
+    fn parses_and_validates_playback_settings() {
+        let config = Config::parse(
+            r#"
+            playback_mode = "linger"
+            linger_cap_secs = 1.8
+            "#,
+        )
+        .expect("valid config");
+        assert_eq!(config.playback_mode, "linger");
+        assert_eq!(config.linger_cap_secs, 1.8);
+        assert_eq!(config.linger_cap_duration(), std::time::Duration::from_millis(1800));
     }
 
     #[test]

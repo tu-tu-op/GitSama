@@ -119,14 +119,23 @@ flowchart TD
 - Stops parsing the stream as soon as the threshold (default: 50) is reached.
 - Never contacts remote servers; falls back to standard `push` on any rev-list parsing error.
 
-### 5. Cross-Process Synchronization (`audio.rs`)
-- Playback runs in a separate detached process (`CREATE_NO_WINDOW | DETACHED_PROCESS` on Windows, fork/setsid on Unix).
-- Prevents overlapping/scrambled sounds using `PlaybackLock`:
-  - Atomic directory creation: `fs::create_dir("~/.gitsama/state/playback.lock")`.
-  - Spawns background thread updating `playback.lock/heartbeat` timestamp every 250ms.
-  - Competing instances check heartbeat staleness (stale if > `queue_max_age_ms`, default 5000ms).
+### 5. Cross-Process Synchronization & Lock Hardening (`audio.rs`)
+- Playback uses an atomic directory lock: `fs::create_dir("~/.gitsama/state/playback.lock")`.
+- **Lock Hardening**:
+  - `owner_pid` is written into the lock folder upon acquisition.
+  - Competing instances check if the owner process is still alive (`platform::process_exists`). If dead, orphaned locks are reclaimed **immediately** (0ms) rather than waiting for staleness timeouts.
+  - Secondary heartbeat thread updates `playback.lock/heartbeat` every 250ms for age staleness (`queue_max_age_ms`, default 5000ms).
+- **Cold-Start Optimization**:
+  - Device output (`OutputStreamBuilder`) and sound decoding are pre-initialized *before* acquiring the lock, reducing lock hold duration and eliminating time-to-first-sound latency.
 
-### 6. Windows / MSYS / Git Quirks (`platform.rs`)
+### 6. Process Lifecycle & Fallback Chain for Coding Agents (`audio.rs`, `platform.rs`)
+- Coding agents (e.g. Antigravity) run commands inside Windows Job Objects with `breakaway_ok=false`, which terminate child processes upon command completion.
+- GitSama implements an ordered 3-tier fallback chain:
+  1. **Tier 1 (Breakaway)**: Spawns worker with `CREATE_BREAKAWAY_FROM_JOB` (works on cmd, VS Code, normal shells).
+  2. **Tier 2 (Outside Launcher)**: If breakaway is denied, creates worker via WMI (`Win32_Process.Create`) under `wmiprvse.exe` outside the parent container. Cached in `state/launcher_tier.txt`.
+  3. **Tier 3 (Linger Mode)**: If container escape is unavailable or forced (`playback_mode="linger"`), plays directly within the hook process, cleanly bounded by `linger_cap_secs` (default: 2.5s).
+
+### 7. Windows / MSYS / Git Quirks (`platform.rs`)
 - Git hooks on Windows run inside MSYS `sh.exe`.
 - Path canonicalization produces Windows UNC paths (`\\?\C:\...`), which MSYS sh fails to execute. `platform::shell_quote` normalizes them to POSIX paths (`/C/...` or `'C:/...'`).
 - Parent PID in MSYS sh (`$PPID`) returns 1. `platform::windows_git_parent()` uses Win32 `ToolHelp32Snapshot` to walk process parents up to 16 levels to locate the real `git.exe` PID.

@@ -108,22 +108,27 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
         logging::write(paths, &format!("pid={pid} playback skipped: no sound file in pack"));
         return Ok(());
     };
+    // Pre-initialize audio output stream and decode audio before acquiring the lock.
+    // This eliminates device spin-up latency while holding the lock and minimizes time-to-first-sound.
+    let stream = OutputStreamBuilder::open_default_stream()
+        .map_err(|error| Error::Audio(error.to_string()))?;
+    logging::write(paths, &format!("pid={pid} audio device opened for {event}"));
+
+    let sink = Sink::connect_new(stream.mixer());
+    sink.pause();
+    let file = File::open(&path)
+        .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
+    let decoder = Decoder::try_from(file).map_err(|error| Error::Audio(error.to_string()))?;
+    sink.set_volume(f32::from(config.volume) / 100.0);
+    sink.append(decoder);
+
     let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
         logging::write(paths, &format!("pid={pid} lock acquire timed out for {event}"));
         return Ok(());
     };
     logging::write(paths, &format!("pid={pid} lock acquired for {event}"));
 
-    let stream = OutputStreamBuilder::open_default_stream()
-        .map_err(|error| Error::Audio(error.to_string()))?;
-    logging::write(paths, &format!("pid={pid} audio device opened for {event}"));
-
-    let sink = Sink::connect_new(stream.mixer());
-    let file = File::open(&path)
-        .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
-    let decoder = Decoder::try_from(file).map_err(|error| Error::Audio(error.to_string()))?;
-    sink.set_volume(f32::from(config.volume) / 100.0);
-    sink.append(decoder);
+    sink.play();
     logging::write(paths, &format!("pid={pid} first sound started for {event}"));
     sink.sleep_until_end();
     logging::write(paths, &format!("pid={pid} playback finished for {event}"));

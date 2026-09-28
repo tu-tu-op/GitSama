@@ -50,6 +50,12 @@ pub enum Command {
     Threshold {
         value: u32,
     },
+    Mode {
+        value: String,
+    },
+    Linger {
+        value: f64,
+    },
     Enable {
         event: String,
     },
@@ -116,6 +122,8 @@ pub fn run() -> Result<()> {
         Some(Command::Test { event }) => test_command(event.as_deref()),
         Some(Command::Volume { value }) => set_volume(value),
         Some(Command::Threshold { value }) => set_threshold(value),
+        Some(Command::Mode { value }) => set_playback_mode(&value),
+        Some(Command::Linger { value }) => set_linger_cap(value),
         Some(Command::Enable { event }) => set_event(&event, true),
         Some(Command::Disable { event }) => set_event(&event, false),
         Some(Command::Mute) => set_enabled(false),
@@ -163,6 +171,7 @@ fn dashboard() -> Result<()> {
     println!("Active Pack  {}", config.active_pack);
     println!("Volume       {}%", config.volume);
     println!("Big Push     {} commits", config.massive_push_threshold);
+    println!("Playback     {}", config.playback_mode);
     println!();
     println!("Quick commands");
     println!();
@@ -312,6 +321,7 @@ fn status() -> Result<()> {
     println!("Active pack  {}", config.active_pack);
     println!("Volume       {}%", config.volume);
     println!("Big Push     {} commits", config.massive_push_threshold);
+    println!("Playback     {}", config.playback_mode);
     println!(
         "Hooks        {global_hooks}/{} registered",
         hooks::HOOKS.len()
@@ -342,6 +352,21 @@ fn settings() -> Result<()> {
         {
             config.massive_push_threshold = parse_threshold(&value)?;
         }
+        if let Some(mode) =
+            prompt_optional("Playback mode [auto/detached/linger] (Enter keeps current): ")?
+        {
+            let mode = mode.trim().to_ascii_lowercase();
+            if ["auto", "detached", "linger"].contains(&mode.as_str()) {
+                config.playback_mode = mode;
+            }
+        }
+        if let Some(value) = prompt_optional("Linger cap seconds (Enter keeps current): ")? {
+            if let Ok(secs) = value.trim().parse::<f64>() {
+                if (0.1..=30.0).contains(&secs) {
+                    config.linger_cap_secs = secs;
+                }
+            }
+        }
         for event in EventKind::ALL {
             let enabled = prompt_yes_no(
                 &format!("Enable {}? [Y/n] ", event.label()),
@@ -362,6 +387,8 @@ fn print_config(config: &Config) {
         "Massive Push         {} commits",
         config.massive_push_threshold
     );
+    println!("Playback Mode        {}", config.playback_mode);
+    println!("Linger Cap           {}s", config.linger_cap_secs);
     println!();
     println!("Events");
     for event in EventKind::ALL {
@@ -522,6 +549,35 @@ fn set_threshold(value: u32) -> Result<()> {
     config.massive_push_threshold = value;
     config.save(&paths)?;
     println!("✓ Massive push threshold set to {value} commits");
+    Ok(())
+}
+
+fn set_playback_mode(value: &str) -> Result<()> {
+    let mode = value.trim().to_ascii_lowercase();
+    if !["auto", "detached", "linger"].contains(&mode.as_str()) {
+        return Err(Error::message(
+            "playback mode must be 'auto', 'detached', or 'linger'",
+        ));
+    }
+    let paths = AppPaths::discover()?;
+    let mut config = Config::load_or_default(&paths);
+    config.playback_mode = mode.clone();
+    config.save(&paths)?;
+    println!("✓ Playback mode set to '{mode}'");
+    Ok(())
+}
+
+fn set_linger_cap(value: f64) -> Result<()> {
+    if value <= 0.0 || value > 30.0 {
+        return Err(Error::message(
+            "linger cap must be between 0.1 and 30.0 seconds",
+        ));
+    }
+    let paths = AppPaths::discover()?;
+    let mut config = Config::load_or_default(&paths);
+    config.linger_cap_secs = value;
+    config.save(&paths)?;
+    println!("✓ Linger cap set to {value}s");
     Ok(())
 }
 

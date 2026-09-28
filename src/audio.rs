@@ -3,7 +3,6 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -21,6 +20,7 @@ use crate::{
     events::EventKind,
     logging, packs,
     paths::AppPaths,
+    platform,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -53,7 +53,7 @@ pub fn dispatch(
         return Ok(());
     };
 
-    if test_mode() {
+    if test_mode() && env::var("GITSAMA_DISPATCH_FULL_TIER").is_err() {
         let record = TestRecord {
             event: resolved_event,
             branch: details.branch,
@@ -62,44 +62,287 @@ pub fn dispatch(
         return write_test_record(&record);
     }
 
+    dispatch_with_fallback(paths, config, resolved_event)
+}
+
+fn get_cached_tier(paths: &AppPaths) -> Option<String> {
+    fs::read_to_string(paths.state.join("launcher_tier.txt"))
+        .ok()
+        .map(|s| s.trim().to_ascii_lowercase())
+}
+
+fn set_cached_tier(paths: &AppPaths, tier: &str) {
+    let _ = paths.ensure_layout();
+    let _ = fs::write(paths.state.join("launcher_tier.txt"), tier);
+}
+
+fn dispatch_with_fallback(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
+    let pid = std::process::id();
     let executable = env::current_exe().map_err(|error| {
         Error::Audio(format!("could not locate the GitSama executable: {error}"))
     })?;
-    let mut child = Command::new(executable);
-    child
-        .arg("__play")
-        .arg(resolved_event.as_str())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
 
-    child
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| Error::Audio(format!("could not start detached playback: {error}")))
+    let forced_tier = env::var("GITSAMA_FORCE_TIER").ok();
+
+    if forced_tier.as_deref() == Some("3") || config.playback_mode == "linger" {
+        logging::write(
+            paths,
+            &format!("pid={pid} using Tier 3 (linger mode) directly (config/override)"),
+        );
+        return play_linger(paths, config, event, config.linger_cap_duration());
+    }
+
+    let cached_tier = get_cached_tier(paths);
+    let start_tier = if let Some(ref forced) = forced_tier {
+        match forced.as_str() {
+            "1" => 1,
+            "2" => 2,
+            _ => 3,
+        }
+    } else if let Some(ref tier) = cached_tier {
+        match tier.as_str() {
+            "tier1" => 1,
+            "tier2" => 2,
+            _ => 3,
+        }
+    } else if platform::is_agent_environment() {
+        if platform::breakaway_is_permitted() == Some(false) {
+            logging::write(
+                paths,
+                &format!(
+                    "pid={pid} agent environment detected without breakaway; starting at Tier 2"
+                ),
+            );
+            2
+        } else {
+            1
+        }
+    } else {
+        1
+    };
+
+    // Tier 1: Breakaway spawn
+    if start_tier <= 1 && config.playback_mode != "linger" {
+        logging::write(
+            paths,
+            &format!("pid={pid} attempting Tier 1 (breakaway spawn) for {event}"),
+        );
+        match platform::spawn_tier1_breakaway(&executable, event.as_str()) {
+            Ok(worker_pid) => {
+                logging::write(
+                    paths,
+                    &format!("pid={pid} Tier 1 succeeded (worker_pid={worker_pid}) for {event}"),
+                );
+                set_cached_tier(paths, "tier1");
+                return Ok(());
+            }
+            Err(error) => {
+                logging::write(
+                    paths,
+                    &format!("pid={pid} Tier 1 failed ({error}); falling back to Tier 2"),
+                );
+            }
+        }
+    }
+
+    // Tier 2: Outside-container launcher
+    if start_tier <= 2 && config.playback_mode != "linger" {
+        logging::write(
+            paths,
+            &format!("pid={pid} attempting Tier 2 (outside launcher) for {event}"),
+        );
+        match platform::spawn_tier2_outside(&executable, event.as_str()) {
+            Ok(worker_pid) => {
+                logging::write(
+                    paths,
+                    &format!("pid={pid} Tier 2 succeeded (worker_pid={worker_pid}) for {event}"),
+                );
+                set_cached_tier(paths, "tier2");
+                return Ok(());
+            }
+            Err(error) => {
+                logging::write(
+                    paths,
+                    &format!("pid={pid} Tier 2 failed ({error}); falling back to Tier 3"),
+                );
+            }
+        }
+    }
+
+    // Tier 3: Linger mode
+    if config.playback_mode != "detached" {
+        logging::write(
+            paths,
+            &format!("pid={pid} falling back to Tier 3 (linger mode) for {event}"),
+        );
+        set_cached_tier(paths, "tier3");
+        play_linger(paths, config, event, config.linger_cap_duration())
+    } else {
+        logging::write(
+            paths,
+            &format!("pid={pid} detached playback failed and linger disabled"),
+        );
+        Ok(())
+    }
 }
 
-pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
+pub fn play_linger(
+    paths: &AppPaths,
+    config: &Config,
+    event: EventKind,
+    cap: Duration,
+) -> Result<()> {
+    let pid = std::process::id();
+    logging::write(
+        paths,
+        &format!("pid={pid} linger playback started: {event} (cap: {cap:?})"),
+    );
+
+    if test_mode() {
+        let record = TestRecord {
+            event,
+            branch: None,
+            commit_count: None,
+        };
+        logging::write(
+            paths,
+            &format!("pid={pid} test mode linger record written for {event}"),
+        );
+        return write_test_record(&record);
+    }
+
     if !config.enabled {
+        logging::write(
+            paths,
+            &format!("pid={pid} linger playback skipped: muted/disabled"),
+        );
         return Ok(());
     }
+
     let pack = packs::find(paths, &config.active_pack)?;
     let Some((_, path)) = pack.resolve(event) else {
-        return Ok(());
-    };
-    let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
+        logging::write(
+            paths,
+            &format!("pid={pid} linger playback skipped: no sound file in pack"),
+        );
         return Ok(());
     };
 
     let stream = OutputStreamBuilder::open_default_stream()
         .map_err(|error| Error::Audio(error.to_string()))?;
+    logging::write(
+        paths,
+        &format!("pid={pid} audio device opened for linger {event}"),
+    );
+
     let sink = Sink::connect_new(stream.mixer());
+    sink.pause();
     let file = File::open(&path)
         .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
     let decoder = Decoder::try_from(file).map_err(|error| Error::Audio(error.to_string()))?;
     sink.set_volume(f32::from(config.volume) / 100.0);
     sink.append(decoder);
+
+    let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
+        logging::write(
+            paths,
+            &format!("pid={pid} lock acquire timed out for linger {event}"),
+        );
+        return Ok(());
+    };
+    logging::write(
+        paths,
+        &format!("pid={pid} lock acquired for linger {event}"),
+    );
+
+    sink.play();
+    logging::write(
+        paths,
+        &format!("pid={pid} first sound started for linger {event}"),
+    );
+
+    let start = Instant::now();
+    while !sink.empty() {
+        if start.elapsed() >= cap {
+            sink.stop();
+            logging::write(
+                paths,
+                &format!("pid={pid} linger playback cleanly stopped at cap ({cap:?})"),
+            );
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    logging::write(
+        paths,
+        &format!("pid={pid} playback finished for linger {event}"),
+    );
+    Ok(())
+}
+
+pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
+    let pid = std::process::id();
+    let job_info = platform::current_job_info();
+    logging::write(
+        paths,
+        &format!("pid={pid} worker started: {event} [{job_info}]"),
+    );
+
+    if test_mode() {
+        let record = TestRecord {
+            event,
+            branch: None,
+            commit_count: None,
+        };
+        logging::write(
+            paths,
+            &format!("pid={pid} test mode playback record written for {event}"),
+        );
+        return write_test_record(&record);
+    }
+    if !config.enabled {
+        logging::write(
+            paths,
+            &format!("pid={pid} playback skipped: muted/disabled"),
+        );
+        return Ok(());
+    }
+    let pack = packs::find(paths, &config.active_pack)?;
+    let Some((_, path)) = pack.resolve(event) else {
+        logging::write(
+            paths,
+            &format!("pid={pid} playback skipped: no sound file in pack"),
+        );
+        return Ok(());
+    };
+    // Pre-initialize audio output stream and decode audio before acquiring the lock.
+    // This eliminates device spin-up latency while holding the lock and minimizes time-to-first-sound.
+    let stream = OutputStreamBuilder::open_default_stream()
+        .map_err(|error| Error::Audio(error.to_string()))?;
+    logging::write(paths, &format!("pid={pid} audio device opened for {event}"));
+
+    let sink = Sink::connect_new(stream.mixer());
+    sink.pause();
+    let file = File::open(&path)
+        .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
+    let decoder = Decoder::try_from(file).map_err(|error| Error::Audio(error.to_string()))?;
+    sink.set_volume(f32::from(config.volume) / 100.0);
+    sink.append(decoder);
+
+    let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
+        logging::write(
+            paths,
+            &format!("pid={pid} lock acquire timed out for {event}"),
+        );
+        return Ok(());
+    };
+    logging::write(paths, &format!("pid={pid} lock acquired for {event}"));
+
+    sink.play();
+    logging::write(paths, &format!("pid={pid} first sound started for {event}"));
     sink.sleep_until_end();
+    logging::write(paths, &format!("pid={pid} playback finished for {event}"));
     Ok(())
 }
 
@@ -164,6 +407,7 @@ fn write_test_record_to(path: &Path, record: &TestRecord) -> Result<()> {
 
 struct PlaybackLock {
     path: PathBuf,
+    paths: AppPaths,
     stop: Arc<AtomicBool>,
     heartbeat: Option<thread::JoinHandle<()>>,
 }
@@ -177,7 +421,7 @@ impl PlaybackLock {
 
         loop {
             match fs::create_dir(&path) {
-                Ok(()) => match Self::start(path.clone()) {
+                Ok(()) => match Self::start(paths.clone(), path.clone()) {
                     Ok(lock) => return Ok(Some(lock)),
                     Err(error) => {
                         let _ = fs::remove_dir_all(&path);
@@ -204,7 +448,15 @@ impl PlaybackLock {
         }
     }
 
-    fn start(path: PathBuf) -> Result<Self> {
+    fn start(paths: AppPaths, path: PathBuf) -> Result<Self> {
+        let pid_path = path.join("owner_pid");
+        if let Err(source) = fs::write(&pid_path, std::process::id().to_string()) {
+            let _ = fs::remove_dir_all(&path);
+            return Err(Error::WriteFile {
+                path: pid_path,
+                source,
+            });
+        }
         let heartbeat_path = path.join("heartbeat");
         if let Err(source) = fs::write(&heartbeat_path, b"active") {
             let _ = fs::remove_dir_all(&path);
@@ -233,6 +485,7 @@ impl PlaybackLock {
             Ok(heartbeat) => heartbeat,
             Err(source) => {
                 let _ = fs::remove_file(&thread_path);
+                let _ = fs::remove_file(&pid_path);
                 let _ = fs::remove_dir_all(&path);
                 return Err(Error::Audio(format!(
                     "could not start playback heartbeat: {source}"
@@ -241,6 +494,7 @@ impl PlaybackLock {
         };
         Ok(Self {
             path,
+            paths,
             stop,
             heartbeat: Some(heartbeat),
         })
@@ -253,12 +507,27 @@ impl Drop for PlaybackLock {
         if let Some(heartbeat) = self.heartbeat.take() {
             let _ = heartbeat.join();
         }
+        let _ = fs::remove_file(self.path.join("owner_pid"));
         let _ = fs::remove_file(self.path.join("heartbeat"));
-        let _ = fs::remove_dir(&self.path);
+        let _ = fs::remove_dir_all(&self.path);
+        logging::write(
+            &self.paths,
+            &format!("pid={} lock released", std::process::id()),
+        );
     }
 }
 
 fn lock_is_stale(path: &Path, max_age: Duration) -> bool {
+    // Primary check: if owner process is dead, the lock is immediately stale.
+    if let Ok(content) = fs::read_to_string(path.join("owner_pid")) {
+        if let Ok(pid) = content.trim().parse::<u32>() {
+            if !platform::process_exists(pid) {
+                return true;
+            }
+        }
+    }
+
+    // Secondary check: heartbeat or lock modification age
     fs::metadata(path.join("heartbeat"))
         .or_else(|_| fs::metadata(path))
         .and_then(|metadata| metadata.modified())
@@ -289,6 +558,28 @@ mod tests {
         assert!(paths.state.join("playback.lock").exists());
         drop(lock);
         assert!(!paths.state.join("playback.lock").exists());
+    }
+
+    #[test]
+    fn stale_lock_from_dead_process_is_reclaimed_immediately() {
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join(".gitsama"));
+        paths.ensure_layout().expect("layout");
+        let lock_dir = paths.state.join("playback.lock");
+        fs::create_dir_all(&lock_dir).expect("create lock dir");
+        // Non-existent PID
+        fs::write(lock_dir.join("owner_pid"), "999999999").expect("write pid");
+        fs::write(lock_dir.join("heartbeat"), "active").expect("write heartbeat");
+
+        let start = std::time::Instant::now();
+        let lock = PlaybackLock::acquire(&paths, 10_000)
+            .expect("acquire")
+            .expect("should acquire");
+        assert!(
+            start.elapsed().as_millis() < 1000,
+            "Lock took too long to reclaim"
+        );
+        drop(lock);
     }
 
     #[test]

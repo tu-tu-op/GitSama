@@ -200,6 +200,50 @@ pub fn spawn_detached(command: &mut Command) -> std::io::Result<u32> {
     command.spawn().map(|child| child.id())
 }
 
+#[cfg(windows)]
+pub fn process_exists(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    if pid == 0 {
+        return false;
+    }
+
+    const STILL_ACTIVE: u32 = 259;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            let error = GetLastError();
+            return error != ERROR_INVALID_PARAMETER;
+        }
+        let mut exit_code: u32 = 0;
+        let success = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        success != 0 && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(not(windows))]
+pub fn process_exists(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    let status = std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match status {
+        Ok(s) => s.success(),
+        Err(_) => std::path::Path::new(&format!("/proc/{pid}")).exists(),
+    }
+}
+
 
 pub fn schedule_cleanup(executable: &Path, data_root: Option<&Path>) -> Result<()> {
     #[cfg(windows)]
@@ -426,6 +470,12 @@ mod tests {
         command.stdout(std::process::Stdio::null());
         command.stderr(std::process::Stdio::null());
         assert!(super::spawn_detached(&mut command).is_ok());
+    }
+
+    #[test]
+    fn process_exists_checks_current_and_invalid_pid() {
+        assert!(super::process_exists(std::process::id()));
+        assert!(!super::process_exists(999_999_999));
     }
 }
 

@@ -233,6 +233,14 @@ impl PlaybackLock {
     }
 
     fn start(paths: AppPaths, path: PathBuf) -> Result<Self> {
+        let pid_path = path.join("owner_pid");
+        if let Err(source) = fs::write(&pid_path, std::process::id().to_string()) {
+            let _ = fs::remove_dir_all(&path);
+            return Err(Error::WriteFile {
+                path: pid_path,
+                source,
+            });
+        }
         let heartbeat_path = path.join("heartbeat");
         if let Err(source) = fs::write(&heartbeat_path, b"active") {
             let _ = fs::remove_dir_all(&path);
@@ -261,6 +269,7 @@ impl PlaybackLock {
             Ok(heartbeat) => heartbeat,
             Err(source) => {
                 let _ = fs::remove_file(&thread_path);
+                let _ = fs::remove_file(&pid_path);
                 let _ = fs::remove_dir_all(&path);
                 return Err(Error::Audio(format!(
                     "could not start playback heartbeat: {source}"
@@ -282,6 +291,7 @@ impl Drop for PlaybackLock {
         if let Some(heartbeat) = self.heartbeat.take() {
             let _ = heartbeat.join();
         }
+        let _ = fs::remove_file(self.path.join("owner_pid"));
         let _ = fs::remove_file(self.path.join("heartbeat"));
         let _ = fs::remove_dir_all(&self.path);
         logging::write(&self.paths, &format!("pid={} lock released", std::process::id()));
@@ -289,6 +299,16 @@ impl Drop for PlaybackLock {
 }
 
 fn lock_is_stale(path: &Path, max_age: Duration) -> bool {
+    // Primary check: if owner process is dead, the lock is immediately stale.
+    if let Ok(content) = fs::read_to_string(path.join("owner_pid")) {
+        if let Ok(pid) = content.trim().parse::<u32>() {
+            if !platform::process_exists(pid) {
+                return true;
+            }
+        }
+    }
+
+    // Secondary check: heartbeat or lock modification age
     fs::metadata(path.join("heartbeat"))
         .or_else(|_| fs::metadata(path))
         .and_then(|metadata| metadata.modified())
@@ -319,6 +339,25 @@ mod tests {
         assert!(paths.state.join("playback.lock").exists());
         drop(lock);
         assert!(!paths.state.join("playback.lock").exists());
+    }
+
+    #[test]
+    fn stale_lock_from_dead_process_is_reclaimed_immediately() {
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join(".gitsama"));
+        paths.ensure_layout().expect("layout");
+        let lock_dir = paths.state.join("playback.lock");
+        fs::create_dir_all(&lock_dir).expect("create lock dir");
+        // Non-existent PID
+        fs::write(lock_dir.join("owner_pid"), "999999999").expect("write pid");
+        fs::write(lock_dir.join("heartbeat"), "active").expect("write heartbeat");
+
+        let start = std::time::Instant::now();
+        let lock = PlaybackLock::acquire(&paths, 10_000)
+            .expect("acquire")
+            .expect("should acquire");
+        assert!(start.elapsed().as_millis() < 1000, "Lock took too long to reclaim");
+        drop(lock);
     }
 
     #[test]

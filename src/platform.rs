@@ -162,6 +162,187 @@ pub fn current_job_info() -> String {
 }
 
 #[cfg(windows)]
+pub fn breakaway_is_permitted() -> Option<bool> {
+    use windows_sys::Win32::System::JobObjects::{
+        IsProcessInJob, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+        JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    unsafe {
+        let mut in_job: i32 = 0;
+        if IsProcessInJob(GetCurrentProcess(), std::ptr::null_mut(), &mut in_job) != 0 {
+            if in_job != 0 {
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                let mut ret_len: u32 = 0;
+                let success = QueryInformationJobObject(
+                    std::ptr::null_mut(),
+                    JobObjectExtendedLimitInformation,
+                    &mut info as *mut _ as *mut _,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                    &mut ret_len,
+                );
+                if success != 0 {
+                    let flags = info.BasicLimitInformation.LimitFlags;
+                    let breakaway = (flags & JOB_OBJECT_LIMIT_BREAKAWAY_OK) != 0
+                        || (flags & JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK) != 0;
+                    Some(breakaway)
+                } else {
+                    None
+                }
+            } else {
+                Some(true)
+            }
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn breakaway_is_permitted() -> Option<bool> {
+    Some(true)
+}
+
+pub fn is_agent_environment() -> bool {
+    const AGENT_ENV_VARS: [&str; 8] = [
+        "ANTIGRAVITY_AGENT",
+        "GEMINI_CLI",
+        "CLAUDE_CODE",
+        "AGENT_MODE",
+        "AI_AGENT",
+        "CODING_AGENT",
+        "CURSOR_AGENT",
+        "AGENT_EXECUTION",
+    ];
+
+    if AGENT_ENV_VARS.iter().any(|var| std::env::var_os(var).is_some()) {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        if let Some(false) = breakaway_is_permitted() {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[cfg(windows)]
+pub fn spawn_tier1_breakaway(executable: &Path, event: &str) -> std::io::Result<u32> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    if let Some(false) = breakaway_is_permitted() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "job object explicitly forbids breakaway",
+        ));
+    }
+
+    let mut command = Command::new(executable);
+    command
+        .arg("__play")
+        .arg(event)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(
+            CREATE_BREAKAWAY_FROM_JOB
+                | DETACHED_PROCESS
+                | CREATE_NEW_PROCESS_GROUP
+                | CREATE_NO_WINDOW,
+        );
+
+    command.spawn().map(|child| child.id())
+}
+
+#[cfg(not(windows))]
+pub fn spawn_tier1_breakaway(executable: &Path, event: &str) -> std::io::Result<u32> {
+    use std::os::unix::process::CommandExt;
+
+    let mut command = Command::new(executable);
+    command
+        .arg("__play")
+        .arg(event)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command.process_group(0);
+    command.spawn().map(|child| child.id())
+}
+
+#[cfg(windows)]
+pub fn spawn_tier2_outside(executable: &Path, event: &str) -> std::io::Result<u32> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let exe_path = executable.display().to_string().replace('\'', "''");
+    let script = format!(
+        "$res = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine = '\"{}\" __play {}'}}; if ($res.ReturnValue -eq 0) {{ $res.ProcessId }} else {{ exit 1 }}",
+        exe_path, event
+    );
+
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .stdin(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Some(pid) = stdout.split_whitespace().filter_map(|s| s.parse::<u32>().ok()).next() {
+            return Ok(pid);
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!(
+            "WMI process creation failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+    ))
+}
+
+#[cfg(not(windows))]
+pub fn spawn_tier2_outside(executable: &Path, event: &str) -> std::io::Result<u32> {
+    let output = Command::new("systemd-run")
+        .args([
+            "--user",
+            "--scope",
+            "--quiet",
+            executable.to_str().unwrap_or("gitsama"),
+            "__play",
+            event,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    match output {
+        Ok(out) if out.status.success() => Ok(0),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "transient user scope not available",
+        )),
+    }
+}
+
+#[cfg(windows)]
 pub fn spawn_detached(command: &mut Command) -> std::io::Result<u32> {
     use std::os::windows::process::CommandExt;
 

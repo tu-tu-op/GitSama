@@ -843,3 +843,62 @@ fn old_git_setup_makes_no_global_hook_changes() {
     assert!(message.contains("GitSama needs Git 2.54 or newer"));
     assert!(!sandbox.global_config.exists());
 }
+
+#[test]
+fn fallback_chain_forces_tier3_linger_mode() {
+    if !supported_named_hooks() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("tier3-repo");
+
+    let mut command = Command::new("git");
+    command.args(["commit", "--quiet", "--allow-empty", "-m", "tier3 test"]);
+    sandbox.apply_env(&mut command);
+    command.env("GITSAMA_FORCE_TIER", "3");
+    command.current_dir(&repo);
+    let output = command.output().expect("run git commit");
+    assert!(output.status.success());
+
+    let events = sandbox.wait_for_events(1);
+    assert_eq!(events, vec!["commit"]);
+}
+
+#[test]
+fn fallback_chain_tier1_failure_falls_back_to_tier3() {
+    if !supported_named_hooks() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("fallback-repo");
+
+    let config_path = sandbox.home.join("config.toml");
+    let mut config_text = fs::read_to_string(&config_path).unwrap_or_default();
+    config_text.push_str("\nplayback_mode = 'linger'\nlinger_cap_secs = 2.0\n");
+    fs::write(&config_path, config_text).expect("write config");
+
+    sandbox.commit(&repo, "linger commit");
+    let events = sandbox.wait_for_events(1);
+    assert_eq!(events, vec!["commit"]);
+}
+
+#[test]
+fn dead_process_lock_is_reclaimed_by_hook() {
+    if !supported_named_hooks() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let repo = sandbox.init_repo("lock-recovery-repo");
+
+    let lock_dir = sandbox.home.join("state").join("playback.lock");
+    fs::create_dir_all(&lock_dir).expect("lock dir");
+    fs::write(lock_dir.join("owner_pid"), "999999999").expect("write dead pid");
+    fs::write(lock_dir.join("heartbeat"), "active").expect("write heartbeat");
+
+    sandbox.commit(&repo, "recovery commit");
+    let events = sandbox.wait_for_events(1);
+    assert_eq!(events, vec!["commit"]);
+}

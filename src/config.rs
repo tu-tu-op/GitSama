@@ -285,7 +285,10 @@ mod tests {
         .expect("valid config");
         assert_eq!(config.playback_mode, "linger");
         assert_eq!(config.linger_cap_secs, 1.8);
-        assert_eq!(config.linger_cap_duration(), std::time::Duration::from_millis(1800));
+        assert_eq!(
+            config.linger_cap_duration(),
+            std::time::Duration::from_millis(1800)
+        );
     }
 
     #[test]

@@ -19,7 +19,8 @@ use crate::{
     error::{Error, Result},
     events::EventKind,
     logging, packs,
-    paths::AppPaths, platform,
+    paths::AppPaths,
+    platform,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -75,11 +76,7 @@ fn set_cached_tier(paths: &AppPaths, tier: &str) {
     let _ = fs::write(paths.state.join("launcher_tier.txt"), tier);
 }
 
-fn dispatch_with_fallback(
-    paths: &AppPaths,
-    config: &Config,
-    event: EventKind,
-) -> Result<()> {
+fn dispatch_with_fallback(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
     let pid = std::process::id();
     let executable = env::current_exe().map_err(|error| {
         Error::Audio(format!("could not locate the GitSama executable: {error}"))
@@ -112,7 +109,9 @@ fn dispatch_with_fallback(
         if platform::breakaway_is_permitted() == Some(false) {
             logging::write(
                 paths,
-                &format!("pid={pid} agent environment detected without breakaway; starting at Tier 2"),
+                &format!(
+                    "pid={pid} agent environment detected without breakaway; starting at Tier 2"
+                ),
             );
             2
         } else {
@@ -124,7 +123,10 @@ fn dispatch_with_fallback(
 
     // Tier 1: Breakaway spawn
     if start_tier <= 1 && config.playback_mode != "linger" {
-        logging::write(paths, &format!("pid={pid} attempting Tier 1 (breakaway spawn) for {event}"));
+        logging::write(
+            paths,
+            &format!("pid={pid} attempting Tier 1 (breakaway spawn) for {event}"),
+        );
         match platform::spawn_tier1_breakaway(&executable, event.as_str()) {
             Ok(worker_pid) => {
                 logging::write(
@@ -145,7 +147,10 @@ fn dispatch_with_fallback(
 
     // Tier 2: Outside-container launcher
     if start_tier <= 2 && config.playback_mode != "linger" {
-        logging::write(paths, &format!("pid={pid} attempting Tier 2 (outside launcher) for {event}"));
+        logging::write(
+            paths,
+            &format!("pid={pid} attempting Tier 2 (outside launcher) for {event}"),
+        );
         match platform::spawn_tier2_outside(&executable, event.as_str()) {
             Ok(worker_pid) => {
                 logging::write(
@@ -166,11 +171,17 @@ fn dispatch_with_fallback(
 
     // Tier 3: Linger mode
     if config.playback_mode != "detached" {
-        logging::write(paths, &format!("pid={pid} falling back to Tier 3 (linger mode) for {event}"));
+        logging::write(
+            paths,
+            &format!("pid={pid} falling back to Tier 3 (linger mode) for {event}"),
+        );
         set_cached_tier(paths, "tier3");
         play_linger(paths, config, event, config.linger_cap_duration())
     } else {
-        logging::write(paths, &format!("pid={pid} detached playback failed and linger disabled"));
+        logging::write(
+            paths,
+            &format!("pid={pid} detached playback failed and linger disabled"),
+        );
         Ok(())
     }
 }
@@ -193,24 +204,36 @@ pub fn play_linger(
             branch: None,
             commit_count: None,
         };
-        logging::write(paths, &format!("pid={pid} test mode linger record written for {event}"));
+        logging::write(
+            paths,
+            &format!("pid={pid} test mode linger record written for {event}"),
+        );
         return write_test_record(&record);
     }
 
     if !config.enabled {
-        logging::write(paths, &format!("pid={pid} linger playback skipped: muted/disabled"));
+        logging::write(
+            paths,
+            &format!("pid={pid} linger playback skipped: muted/disabled"),
+        );
         return Ok(());
     }
 
     let pack = packs::find(paths, &config.active_pack)?;
     let Some((_, path)) = pack.resolve(event) else {
-        logging::write(paths, &format!("pid={pid} linger playback skipped: no sound file in pack"));
+        logging::write(
+            paths,
+            &format!("pid={pid} linger playback skipped: no sound file in pack"),
+        );
         return Ok(());
     };
 
     let stream = OutputStreamBuilder::open_default_stream()
         .map_err(|error| Error::Audio(error.to_string()))?;
-    logging::write(paths, &format!("pid={pid} audio device opened for linger {event}"));
+    logging::write(
+        paths,
+        &format!("pid={pid} audio device opened for linger {event}"),
+    );
 
     let sink = Sink::connect_new(stream.mixer());
     sink.pause();
@@ -221,13 +244,22 @@ pub fn play_linger(
     sink.append(decoder);
 
     let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
-        logging::write(paths, &format!("pid={pid} lock acquire timed out for linger {event}"));
+        logging::write(
+            paths,
+            &format!("pid={pid} lock acquire timed out for linger {event}"),
+        );
         return Ok(());
     };
-    logging::write(paths, &format!("pid={pid} lock acquired for linger {event}"));
+    logging::write(
+        paths,
+        &format!("pid={pid} lock acquired for linger {event}"),
+    );
 
     sink.play();
-    logging::write(paths, &format!("pid={pid} first sound started for linger {event}"));
+    logging::write(
+        paths,
+        &format!("pid={pid} first sound started for linger {event}"),
+    );
 
     let start = Instant::now();
     while !sink.empty() {
@@ -242,7 +274,10 @@ pub fn play_linger(
         thread::sleep(Duration::from_millis(25));
     }
 
-    logging::write(paths, &format!("pid={pid} playback finished for linger {event}"));
+    logging::write(
+        paths,
+        &format!("pid={pid} playback finished for linger {event}"),
+    );
     Ok(())
 }
 
@@ -260,16 +295,25 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
             branch: None,
             commit_count: None,
         };
-        logging::write(paths, &format!("pid={pid} test mode playback record written for {event}"));
+        logging::write(
+            paths,
+            &format!("pid={pid} test mode playback record written for {event}"),
+        );
         return write_test_record(&record);
     }
     if !config.enabled {
-        logging::write(paths, &format!("pid={pid} playback skipped: muted/disabled"));
+        logging::write(
+            paths,
+            &format!("pid={pid} playback skipped: muted/disabled"),
+        );
         return Ok(());
     }
     let pack = packs::find(paths, &config.active_pack)?;
     let Some((_, path)) = pack.resolve(event) else {
-        logging::write(paths, &format!("pid={pid} playback skipped: no sound file in pack"));
+        logging::write(
+            paths,
+            &format!("pid={pid} playback skipped: no sound file in pack"),
+        );
         return Ok(());
     };
     // Pre-initialize audio output stream and decode audio before acquiring the lock.
@@ -287,7 +331,10 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
     sink.append(decoder);
 
     let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
-        logging::write(paths, &format!("pid={pid} lock acquire timed out for {event}"));
+        logging::write(
+            paths,
+            &format!("pid={pid} lock acquire timed out for {event}"),
+        );
         return Ok(());
     };
     logging::write(paths, &format!("pid={pid} lock acquired for {event}"));
@@ -463,7 +510,10 @@ impl Drop for PlaybackLock {
         let _ = fs::remove_file(self.path.join("owner_pid"));
         let _ = fs::remove_file(self.path.join("heartbeat"));
         let _ = fs::remove_dir_all(&self.path);
-        logging::write(&self.paths, &format!("pid={} lock released", std::process::id()));
+        logging::write(
+            &self.paths,
+            &format!("pid={} lock released", std::process::id()),
+        );
     }
 }
 
@@ -525,7 +575,10 @@ mod tests {
         let lock = PlaybackLock::acquire(&paths, 10_000)
             .expect("acquire")
             .expect("should acquire");
-        assert!(start.elapsed().as_millis() < 1000, "Lock took too long to reclaim");
+        assert!(
+            start.elapsed().as_millis() < 1000,
+            "Lock took too long to reclaim"
+        );
         drop(lock);
     }
 

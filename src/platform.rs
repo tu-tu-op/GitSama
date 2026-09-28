@@ -120,9 +120,9 @@ pub fn remove_user_path_entry(bin: &Path) -> Result<bool> {
 #[cfg(windows)]
 pub fn current_job_info() -> String {
     use windows_sys::Win32::System::JobObjects::{
-        IsProcessInJob, JobObjectExtendedLimitInformation, QueryInformationJobObject,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-        JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+        IsProcessInJob, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        QueryInformationJobObject,
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
@@ -164,9 +164,9 @@ pub fn current_job_info() -> String {
 #[cfg(windows)]
 pub fn breakaway_is_permitted() -> Option<bool> {
     use windows_sys::Win32::System::JobObjects::{
-        IsProcessInJob, JobObjectExtendedLimitInformation, QueryInformationJobObject,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-        JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+        IsProcessInJob, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        QueryInformationJobObject,
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
@@ -217,7 +217,10 @@ pub fn is_agent_environment() -> bool {
         "AGENT_EXECUTION",
     ];
 
-    if AGENT_ENV_VARS.iter().any(|var| std::env::var_os(var).is_some()) {
+    if AGENT_ENV_VARS
+        .iter()
+        .any(|var| std::env::var_os(var).is_some())
+    {
         return true;
     }
 
@@ -305,17 +308,18 @@ pub fn spawn_tier2_outside(executable: &Path, event: &str) -> std::io::Result<u3
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Some(pid) = stdout.split_whitespace().filter_map(|s| s.parse::<u32>().ok()).next() {
+        if let Some(pid) = stdout
+            .split_whitespace()
+            .filter_map(|s| s.parse::<u32>().ok())
+            .next()
+        {
             return Ok(pid);
         }
     }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!(
-            "WMI process creation failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ),
-    ))
+    Err(std::io::Error::other(format!(
+        "WMI process creation failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    )))
 }
 
 #[cfg(not(windows))]
@@ -354,10 +358,7 @@ pub fn spawn_detached(command: &mut Command) -> std::io::Result<u32> {
     // Break away from any enclosing job object so background workers (audio playback,
     // pending branch dedup) survive job closure in IDEs, CI runners, and agent sandboxes.
     command.creation_flags(
-        CREATE_BREAKAWAY_FROM_JOB
-            | DETACHED_PROCESS
-            | CREATE_NEW_PROCESS_GROUP
-            | CREATE_NO_WINDOW,
+        CREATE_BREAKAWAY_FROM_JOB | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
     );
 
     match command.spawn() {
@@ -424,7 +425,6 @@ pub fn process_exists(pid: u32) -> bool {
         Err(_) => std::path::Path::new(&format!("/proc/{pid}")).exists(),
     }
 }
-
 
 pub fn schedule_cleanup(executable: &Path, data_root: Option<&Path>) -> Result<()> {
     #[cfg(windows)]
@@ -644,8 +644,7 @@ mod tests {
             cmd.args(["/C", "exit 0"]);
             cmd
         } else {
-            let cmd = std::process::Command::new("true");
-            cmd
+            std::process::Command::new("true")
         };
         command.stdin(std::process::Stdio::null());
         command.stdout(std::process::Stdio::null());
@@ -659,4 +658,3 @@ mod tests {
         assert!(!super::process_exists(999_999_999));
     }
 }
-

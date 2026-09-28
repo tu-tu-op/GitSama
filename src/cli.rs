@@ -352,7 +352,9 @@ fn settings() -> Result<()> {
         {
             config.massive_push_threshold = parse_threshold(&value)?;
         }
-        if let Some(mode) = prompt_optional("Playback mode [auto/detached/linger] (Enter keeps current): ")? {
+        if let Some(mode) =
+            prompt_optional("Playback mode [auto/detached/linger] (Enter keeps current): ")?
+        {
             let mode = mode.trim().to_ascii_lowercase();
             if ["auto", "detached", "linger"].contains(&mode.as_str()) {
                 config.playback_mode = mode;
@@ -553,7 +555,9 @@ fn set_threshold(value: u32) -> Result<()> {
 fn set_playback_mode(value: &str) -> Result<()> {
     let mode = value.trim().to_ascii_lowercase();
     if !["auto", "detached", "linger"].contains(&mode.as_str()) {
-        return Err(Error::message("playback mode must be 'auto', 'detached', or 'linger'"));
+        return Err(Error::message(
+            "playback mode must be 'auto', 'detached', or 'linger'",
+        ));
     }
     let paths = AppPaths::discover()?;
     let mut config = Config::load_or_default(&paths);
@@ -565,7 +569,9 @@ fn set_playback_mode(value: &str) -> Result<()> {
 
 fn set_linger_cap(value: f64) -> Result<()> {
     if value <= 0.0 || value > 30.0 {
-        return Err(Error::message("linger cap must be between 0.1 and 30.0 seconds"));
+        return Err(Error::message(
+            "linger cap must be between 0.1 and 30.0 seconds",
+        ));
     }
     let paths = AppPaths::discover()?;
     let mut config = Config::load_or_default(&paths);

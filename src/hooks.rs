@@ -426,7 +426,6 @@ fn spawn_pending(repository: &str, branch: &str) -> Result<()> {
         .map_err(|error| Error::Audio(format!("could not start pending dispatch: {error}")))
 }
 
-
 fn run_pending(repository: &str, branch: &str) -> Result<()> {
     thread::sleep(Duration::from_millis(BRANCH_DEDUP_DELAY_MS));
     let paths = AppPaths::discover()?;

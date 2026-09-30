@@ -286,10 +286,13 @@ pub fn spawn_tier1_breakaway(executable: &Path, event: &str) -> std::io::Result<
 pub fn spawn_tier2_outside(executable: &Path, event: &str) -> std::io::Result<u32> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
 
     let exe_path = executable.display().to_string().replace('\'', "''");
+    // PowerShell's creation flags do not apply to the separate process WMI creates.
     let script = format!(
-        "$res = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine = '\"{}\" __play {}'}}; if ($res.ReturnValue -eq 0) {{ $res.ProcessId }} else {{ exit 1 }}",
+        "$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{{CreateFlags = [uint32]{DETACHED_PROCESS}; ShowWindow = [uint16]0}} -ErrorAction Stop; \
+         $res = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine = '\"{}\" __play {}'; ProcessStartupInformation = $startup}}; if ($res.ReturnValue -eq 0) {{ $res.ProcessId }} else {{ exit 1 }}",
         exe_path, event
     );
 
@@ -650,6 +653,51 @@ mod tests {
         command.stdout(std::process::Stdio::null());
         command.stderr(std::process::Stdio::null());
         assert!(super::spawn_detached(&mut command).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn tier2_worker_starts_without_a_console() {
+        use std::{
+            fs, thread,
+            time::{Duration, Instant},
+        };
+
+        let directory = tempfile::tempdir().expect("worker directory");
+        // Exercise the launcher's quoting as well as its window settings.
+        let executable = directory.path().join("Git Sama O'Reilly.exe");
+        fs::copy(
+            std::env::current_exe().expect("test executable"),
+            &executable,
+        )
+        .expect("copy console probe");
+        let pid = super::spawn_tier2_outside(&executable, "--ignored")
+            .expect("launch console probe through WMI");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while super::process_exists(pid) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert!(!super::process_exists(pid), "console probe did not finish");
+        assert_eq!(
+            fs::read_to_string(executable.with_extension("console")).expect("console probe result"),
+            "false",
+            "the WMI worker must not receive a console window"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess probe invoked by tier2_worker_starts_without_a_console"]
+    fn __play_console_probe() {
+        let executable = std::env::current_exe().expect("probe executable");
+        // SAFETY: GetConsoleWindow has no preconditions and returns a borrowed handle.
+        let has_console =
+            unsafe { !windows_sys::Win32::System::Console::GetConsoleWindow().is_null() };
+        std::fs::write(
+            executable.with_extension("console"),
+            has_console.to_string(),
+        )
+        .expect("write console probe result");
     }
 
     #[test]

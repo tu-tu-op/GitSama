@@ -214,6 +214,7 @@ gitsama test all
 ~~~
 
 Pack contributors keep responsibility for the rights to their audio. The GitSama MIT license does not automatically apply to voice clips, music, or other pack media.
+
 ## Disable GitSama in one repository
 
 Run these commands from inside the repository:
@@ -287,9 +288,9 @@ gitsama test commit
 
 Then check the log path reported by gitsama doctor. Playback errors do not stop Git operations.
 
-### An IDE does not trigger sounds
+### An IDE or coding agent does not play sounds
 
-Confirm that the IDE uses the same local Git installation and that the operation does not bypass hooks. GitSama works below the editor layer with VS Code, JetBrains IDEs, terminal tools, and coding agents that use local Git.
+Confirm that the IDE uses the same local Git installation and that the operation does not bypass hooks. GitSama works below the editor layer with VS Code, JetBrains IDEs, terminal tools, and coding agents that use local Git. For coding agents and sandboxes that terminate process trees upon command exit (e.g. Antigravity), see [Troubleshooting Coding Agents and Sandboxes](docs/TROUBLESHOOTING.md#coding-agents-and-sandboxed-environments) for the 3-tier fallback chain and linger mode settings.
 
 ## Uninstall
 

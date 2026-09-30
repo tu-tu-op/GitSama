@@ -6,15 +6,45 @@ Install it once and keep using Git normally. GitSama works below your terminal, 
 
 ## Install
 
-GitSama is installed once per user. It does not add files to your repositories.
+GitSama is installed once per user. It does not add files to your repositories. Packaged installs use prebuilt binaries, so Rust is not required. All install methods require Git 2.54 or newer.
 
-You need:
+The npm package and Homebrew tap are being prepared for the first public release. Until they are published, use the source installers below.
 
-- Git 2.54 or newer
-- Windows, macOS, or Linux
-- An audio output device for playback
+### npm (Windows, macOS, and Linux)
 
-### Windows PowerShell
+Requires Node.js 18 or newer and npm:
+
+~~~sh
+npm install --global gitsama
+~~~
+
+The npm package downloads the prebuilt binary for your OS and architecture, verifies its SHA-256 checksum, and registers GitSama's named hooks for your user. The bundled Naruto voice pack is part of the binary.
+
+### Windows
+
+~~~powershell
+npm install --global gitsama
+~~~
+
+### macOS
+
+~~~sh
+brew install tu-tu-op/tap/gitsama
+~~~
+
+### Linux
+
+~~~sh
+curl -fsSL https://raw.githubusercontent.com/tu-tu-op/GitSama/main/install.sh | sh
+~~~
+
+The release binaries currently support Windows x64, Linux x64, macOS Intel, and macOS Apple Silicon. Administrator or root access is not required for the per-user installers.
+
+### Install from a source checkout
+
+Source installation is also available. It builds from source when Rust and Cargo are installed; otherwise it downloads the matching release binary.
+
+#### Windows PowerShell
 
 ~~~powershell
 git clone https://github.com/tu-tu-op/GitSama.git
@@ -24,7 +54,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 The execution-policy option applies only to this PowerShell process. It does not change your permanent Windows policy.
 
-### macOS or Linux
+#### macOS or Linux
 
 ~~~sh
 git clone https://github.com/tu-tu-op/GitSama.git
@@ -298,7 +328,15 @@ Confirm that the IDE uses the same local Git installation and that the operation
 gitsama uninstall
 ~~~
 
-The uninstall command removes GitSama's named global hooks, its identifiable PATH entry, the executable, and the per-user GitSama directory. It leaves unrelated hooks and repositories alone.
+The uninstall command removes GitSama's named global hooks, its identifiable PATH entry, the managed executable, and the per-user GitSama directory. It leaves unrelated hooks and repositories alone.
+
+For an npm installation, use:
+
+~~~sh
+npm uninstall --global gitsama
+~~~
+
+The npm uninstall lifecycle removes GitSama's named hooks and preserves packs and configuration.
 
 Use this form to remove the executable and hooks while keeping packs and configuration:
 
@@ -332,6 +370,10 @@ The source code is licensed under MIT. Pack audio needs its own permission and l
 ### Does everyone in a repository hear the sounds?
 
 No. GitSama is installed per user. Only local Git operations performed on a computer with GitSama configured can trigger it.
+
+### Do I need Rust or Node.js?
+
+No Rust toolchain is required when installing a prebuilt release or using a package manager. The npm installation method requires Node.js 18 or newer and npm. A source build requires Rust and Cargo.
 
 ### Does GitSama watch GitHub?
 

@@ -1,0 +1,33 @@
+{
+  "name": "gitsama",
+  "version": "0.1.0",
+  "description": "Anime reactions for your Git workflow",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tu-tu-op/GitSama.git",
+    "directory": "npm"
+  },
+  "homepage": "https://github.com/tu-tu-op/GitSama#readme",
+  "bugs": {
+    "url": "https://github.com/tu-tu-op/GitSama/issues"
+  },
+  "keywords": ["git", "cli", "audio", "developer-tools"],
+  "preferGlobal": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "gitsama": "bin/gitsama.js"
+  },
+  "files": [
+    "bin/gitsama.js",
+    "scripts/postinstall.js",
+    "scripts/preuninstall.js"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "preuninstall": "node scripts/preuninstall.js",
+    "test": "node --test"
+  }
+}

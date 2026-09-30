@@ -2,7 +2,6 @@
 set -eu
 
 REPOSITORY="tu-tu-op/GitSama"
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 USER_HOME=$(printenv HOME 2>/dev/null || true)
 if [ -z "$USER_HOME" ]; then
   echo "Could not find your home directory. Set HOME and run install.sh again." >&2
@@ -10,8 +9,20 @@ if [ -z "$USER_HOME" ]; then
 fi
 INSTALL_ROOT="$USER_HOME/.gitsama"
 BIN_DIR="$INSTALL_ROOT/bin"
-VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$SCRIPT_DIR/Cargo.toml" | head -n 1)
-if [ -z "$VERSION" ]; then VERSION=0.1.0; fi
+VERSION="${GITSAMA_VERSION:-0.1.0}"
+SCRIPT_DIR=""
+if [ -f "$0" ]; then
+  SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+fi
+SOURCE_CHECKOUT=0
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ] \
+  && [ -f "$SCRIPT_DIR/Cargo.toml" ] \
+  && grep -Eq '^name = "gitsama"$' "$SCRIPT_DIR/Cargo.toml"; then
+  SOURCE_CHECKOUT=1
+  if [ -z "${GITSAMA_VERSION:-}" ]; then
+    VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$SCRIPT_DIR/Cargo.toml" | head -n 1)
+  fi
+fi
 
 if ! command -v git >/dev/null 2>&1; then
   echo "GitSama needs Git 2.54 or newer. Git was not found." >&2
@@ -30,9 +41,9 @@ if [ "$GIT_MAJOR" -lt 2 ] || { [ "$GIT_MAJOR" -eq 2 ] && [ "$GIT_MINOR" -lt 54 ]
 fi
 
 SOURCE=""
-if [ -x "$SCRIPT_DIR/target/release/gitsama" ]; then
+if [ "$SOURCE_CHECKOUT" -eq 1 ] && [ -x "$SCRIPT_DIR/target/release/gitsama" ]; then
   SOURCE="$SCRIPT_DIR/target/release/gitsama"
-elif command -v cargo >/dev/null 2>&1; then
+elif [ "$SOURCE_CHECKOUT" -eq 1 ] && command -v cargo >/dev/null 2>&1; then
   echo "Building GitSama from source..."
   cargo build --locked --release --manifest-path "$SCRIPT_DIR/Cargo.toml"
   SOURCE="$SCRIPT_DIR/target/release/gitsama"

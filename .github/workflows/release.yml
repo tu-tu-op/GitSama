@@ -19,23 +19,40 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             asset: "gitsama-${{ github.ref_name }}-windows-x86_64.zip"
+            raw_asset: "gitsama-${{ github.ref_name }}-windows-x86_64.exe"
             binary: gitsama.exe
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset: "gitsama-${{ github.ref_name }}-linux-x86_64.tar.gz"
+            raw_asset: "gitsama-${{ github.ref_name }}-linux-x86_64"
             binary: gitsama
           - os: macos-13
             target: x86_64-apple-darwin
             asset: "gitsama-${{ github.ref_name }}-macos-x86_64.tar.gz"
+            raw_asset: "gitsama-${{ github.ref_name }}-macos-x86_64"
             binary: gitsama
           - os: macos-14
             target: aarch64-apple-darwin
             asset: "gitsama-${{ github.ref_name }}-macos-aarch64.tar.gz"
+            raw_asset: "gitsama-${{ github.ref_name }}-macos-aarch64"
             binary: gitsama
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Install Node.js for package version validation
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify release tag matches package versions
+        shell: bash
+        run: |
+          cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          npm_version="$(node -p "require('./npm/package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$cargo_version"
+          test "$cargo_version" = "$npm_version"
 
       - name: Install Linux audio build dependency
         if: runner.os == 'Linux'
@@ -54,6 +71,7 @@ jobs:
         shell: pwsh
         env:
           ASSET: ${{ matrix.asset }}
+          RAW_ASSET: ${{ matrix.raw_asset }}
           BINARY: ${{ matrix.binary }}
           TARGET: ${{ matrix.target }}
         run: |
@@ -63,21 +81,28 @@ jobs:
           Compress-Archive -Path (Join-Path $staging $env:BINARY) -DestinationPath $env:ASSET
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $env:ASSET).Hash.ToLower()
           "$hash  $env:ASSET" | Out-File -Encoding ascii "$env:ASSET.sha256"
+          Copy-Item -LiteralPath (Join-Path $staging $env:BINARY) -Destination $env:RAW_ASSET
+          $binaryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $env:RAW_ASSET).Hash.ToLower()
+          "$binaryHash  $env:RAW_ASSET" | Out-File -Encoding ascii "$env:RAW_ASSET.sha256"
 
       - name: Package Unix archive
         if: runner.os != 'Windows'
         env:
           ASSET: ${{ matrix.asset }}
+          RAW_ASSET: ${{ matrix.raw_asset }}
           TARGET: ${{ matrix.target }}
         run: |
           staging="$RUNNER_TEMP/gitsama-staging"
           mkdir -p "$staging"
           cp "target/$TARGET/release/gitsama" "$staging/gitsama"
           tar -czf "$ASSET" -C "$staging" gitsama
+          cp "$staging/gitsama" "$RAW_ASSET"
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "$ASSET" > "$ASSET.sha256"
+            sha256sum "$RAW_ASSET" > "$RAW_ASSET.sha256"
           else
             shasum -a 256 "$ASSET" > "$ASSET.sha256"
+            shasum -a 256 "$RAW_ASSET" > "$RAW_ASSET.sha256"
           fi
 
       - name: Upload packaged artifact
@@ -87,6 +112,8 @@ jobs:
           path: |
             ${{ matrix.asset }}
             ${{ matrix.asset }}.sha256
+            ${{ matrix.raw_asset }}
+            ${{ matrix.raw_asset }}.sha256
           if-no-files-found: error
 
   publish:

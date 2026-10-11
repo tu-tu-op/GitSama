@@ -146,6 +146,7 @@ jobs:
 
   publish-npm:
     name: Publish npm package
+    if: vars.NPM_TRUSTED_PUBLISHING == 'true'
     needs: publish
     runs-on: ubuntu-latest
     permissions:

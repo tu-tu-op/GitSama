@@ -20,6 +20,8 @@ Detached audio process
 
 Configuration, packs, pending branch state, playback coordination, and logs live under the user's GitSama home directory. GITSAMA_HOME can point at a temporary directory for tests. A project working tree receives no files. The only repository-local state used by GitSama is a local Git config override for off-here.
 
+`pack_state.rs` stores per-pack creation, successful-preview fingerprints, invitation status, and contribution PR URLs in `state/pack-<id>.json`. Records are atomically replaced and removed with the pack. They are not part of a pack export.
+
 ## Git 2.54 and configured hooks
 
 Setup checks the installed Git version before making changes. On a supported Git, it registers one named hook per native event with hook.gitsama-*.event, hook.gitsama-*.command, and hook.gitsama-*.enabled through git config. The command is an absolute, shell-quoted path to the installed executable.
@@ -56,4 +58,14 @@ All hook paths catch failures, write safe diagnostics to `~/.gitsama/logs/gitsam
 ## Pack security
 
 A pack manifest is data. Every event path must be relative, stay inside the pack root after canonicalization, point to a supported audio extension, and refer to a regular file. Unsafe symlinks and traversal are rejected. No manifest field is executed as a command.
+
+Folder imports discover event-named audio in the source root and direct `audio/` directory, reject collisions and unmatched supported audio, and generate mappings. `tempfile` staging lives under GitSama's state directory so a validated pack can be renamed into `packs/<id>/` on the same filesystem. Sources are copied without importing source-folder Git history. Empty manually authored templates remain available through `--template`.
+
+## Full previews and contribution
+
+Explicit previews return completed playback or a specific skip reason. `test all` records success when at least one clip completes and all available event previews finish; mute, zero volume, queue timeouts, and errors prevent success. The manifest and referenced-audio fingerprint detects edits before submission. The first successful full preview of a locally scaffolded installation records and prints a contribution invitation.
+
+`contribute.rs` uses authenticated GitHub CLI only for an explicit `pack contribute` request. It clones upstream's current default branch into a temporary checkout, exports the manifest, generated contribution README, and referenced audio, and checks an exact additions-only file list before and after committing. Git operations isolate repository environment variables, global/system configuration, templates, hooks, and commit identity. Fork branches are based on upstream regardless of the fork's current default-branch history.
+
+Submission pushes a unique branch to the contributor's fork, or upstream for its owner, then invokes `gh pr create` with explicit repository, base, head, title, and body-file arguments. Success records the PR URL; failures preserve prepared work and recovery instructions under GitSama's state directory. Local Git fixtures and stubbed GitHub calls exercise submission without contacting GitHub or requiring an audio device.
 

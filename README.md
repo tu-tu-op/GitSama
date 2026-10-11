@@ -78,7 +78,7 @@ gitsama status
 gitsama test all
 ~~~
 
-gitsama doctor checks Git, the installed binary, sound output, the active pack, and every GitSama hook. gitsama test all plays one sound for each supported event.
+gitsama doctor checks Git, the installed binary, sound output, the active pack, and every GitSama hook. gitsama test all previews each event and reports completed playback, missing sounds, fallback playback, and skips.
 
 ## Use Git normally
 
@@ -106,6 +106,13 @@ gitsama doctor --fix            Repair GitSama-owned configuration
 gitsama settings                View or edit settings
 gitsama packs                   Choose an installed pack
 gitsama pack list               List installed packs
+gitsama pack scaffold [name]    Install and select clips from this folder
+gitsama pack scaffold --template <name> [parent]
+                               Create an empty pack to edit manually
+gitsama pack add <path>         Install a manually authored pack
+gitsama pack validate <path>    Validate a pack manifest and its files
+gitsama pack remove <id>        Remove a pack and its local records
+gitsama pack contribute <id>    Submit a tested pack as a GitHub PR
 gitsama use <id>                Select a pack
 gitsama test [event|all]        Play one event or every event
 gitsama volume <0-100>          Set the volume
@@ -148,13 +155,15 @@ GitSama uses Git's user-level configured hook system from Git 2.54. It registers
 
 ## Local by design
 
-GitSama runs on your computer only:
+GitSama's hooks, playback, pack creation, validation, and previews run on your computer:
 
 - It does not watch GitHub or remote repositories.
 - It does not monitor teammates or other computers.
 - It has no account, server, database, telemetry, analytics, or background network service.
-- It does not send repository names, commit messages, credentials, remote activity, pack usage, or audio anywhere.
+- Hooks and previews keep repository activity and pack usage local.
 - It does not add files to a project repository.
+
+The explicit `gitsama pack contribute` command uses your authenticated GitHub CLI to publish the selected pack's manifest, contribution README, and referenced audio through a pull request.
 
 Permanent files are stored in:
 
@@ -174,23 +183,37 @@ The Naruto pack is selected by default. GitSama supports WAV, MP3, OGG, and FLAC
 
 ### Create and install a custom pack
 
+Put renamed clips in a folder, open a terminal there, and run:
+
 ~~~sh
-gitsama pack scaffold "My Custom Pack"
-cd my-custom-pack
-# Add legally usable files under audio/ and edit pack.toml.
+cd Bleach
+gitsama pack scaffold
+gitsama test all
+~~~
+
+This installs and selects **Bleach** with the ID **bleach** under your GitSama home at `packs/bleach/`. The installed path is printed. Your source folder stays unchanged. You can override the name while importing:
+
+~~~sh
+gitsama pack scaffold "Bleach Bankai"
+~~~
+
+GitSama discovers WAV, MP3, OGG, and FLAC files in the current folder and its direct `audio/` subfolder. Use event names such as `commit.mp3`, `push.wav`, `massive-push.ogg`, `merge.flac`, `branch-switch.mp3`, `branch-create.mp3`, `branch-delete.mp3`, or `rebase.mp3`. Case differences, underscores, and numbered variants such as `Commit_1.MP3` are accepted.
+
+A partial pack needs at least one mapped event. Missing events are listed, and massive push falls back to push. Unmatched audio filenames, duplicate basenames across the two folders, unsafe files, reserved IDs, and already installed IDs produce corrective errors. Rename conflicting clips or choose a different pack name before retrying.
+
+For an empty template that you will edit manually:
+
+~~~sh
+gitsama pack scaffold --template "My Custom Pack" ./packs
+cd ./packs/my-custom-pack
+# Add clips under audio/ and edit the event arrays in pack.toml.
 gitsama pack validate .
 gitsama pack add .
 gitsama use my-custom-pack
 gitsama test all
 ~~~
 
-You can create the pack under a different parent directory:
-
-~~~sh
-gitsama pack scaffold "My Custom Pack" ./packs
-~~~
-
-This creates ./packs/my-custom-pack.
+The template parent is optional. `pack add` remains available for downloaded or manually authored packs.
 
 A pack has this general layout:
 
@@ -209,7 +232,7 @@ my-pack/
     |-- rebase.mp3
 ~~~
 
-The manifest maps generic event names to relative audio paths. It cannot contain commands. Validation rejects absolute paths, parent traversal, unsafe symlinks, missing files, unsupported extensions, and files outside the pack directory. See docs/PACKS.md for the complete manifest schema.
+The manifest maps generic event names to relative audio paths. It cannot contain commands. Validation rejects absolute paths, parent traversal, unsafe symlinks, missing files, unsupported extensions, and files outside the pack directory. See [Sound packs](docs/PACKS.md) for the complete manifest schema.
 
 Do not add copyrighted audio to this repository without permission to redistribute it. Local packs may contain media you are legally allowed to use. Every public pack contribution must include permission and license information for its audio.
 
@@ -217,22 +240,24 @@ Do not add copyrighted audio to this repository without permission to redistribu
 
 You can share a voice pack with other GitSama users. A pack is data-only: it contains a pack.toml file, audio files, and optional documentation. It does not require Rust changes or a new build.
 
-To contribute a pack to this repository:
+After the first successful full preview of a folder-scaffolded pack, GitSama prints:
 
-1. Create the pack with gitsama pack scaffold.
-2. Add audio that you created or have permission to redistribute.
-3. Set the author, version, description, and license fields in pack.toml.
-4. Add a pack README that explains the audio source and permission or license terms.
-5. Validate the pack and test every event:
+~~~sh
+gitsama pack contribute bleach
+~~~
 
-   ~~~sh
-   gitsama pack validate ./packs/my-voice-pack
-   gitsama pack add ./packs/my-voice-pack
-   gitsama use my-voice-pack
-   gitsama test all
-   ~~~
+The invitation appears once per installation. A full preview qualifies when at least one clip completes and every available event preview finishes. Single-event previews, muted or zero-volume playback, queue timeouts, and playback errors do not qualify. Edit the installed pack at the printed path, then repeat `gitsama test all` after any manifest or referenced-audio changes.
 
-6. Add the pack under packs/ and open a pull request. Follow CONTRIBUTING.md for the pull request checklist.
+Install [GitHub CLI](https://cli.github.com/) and authenticate before submitting:
+
+~~~sh
+gh auth login --hostname github.com
+gitsama pack contribute bleach --author "Your Name Here" --license "CC0-1.0" --source "Original recordings by me; released under CC0-1.0 for redistribution."
+~~~
+
+Supply truthful licensing and source details for your clips. Interactive use prompts for missing metadata; noninteractive use must supply it. Existing author and license values can be used when the manifest contains actual attribution rather than scaffold placeholders.
+
+GitSama prepares an isolated checkout of upstream's current default branch, creates or reuses your fork, and opens a PR containing additions under `packs/bleach/`. Repository owners use a new upstream branch. The command prints and records the PR URL. If submission fails, it prints the retained workspace and recovery instructions. See [Contribution guidance](CONTRIBUTING.md#pack-contributions).
 
 Other users can install a shared pack from a downloaded or cloned pack directory:
 
@@ -277,6 +302,8 @@ gitsama unmute
 
 The diagnostic log is stored at ~/.gitsama/logs/gitsama.log on macOS and Linux, or %USERPROFILE%\.gitsama\logs\gitsama.log on Windows.
 
+Pack creation, completed-preview fingerprints, invitations, and PR URLs are recorded under `state/pack-<id>.json`. `gitsama pack remove <id>` clears that pack's record. `GITSAMA_HOME` overrides the GitSama home directory.
+
 ## Troubleshooting
 
 Start with:
@@ -317,6 +344,8 @@ gitsama test commit
 ~~~
 
 Then check the log path reported by gitsama doctor. Playback errors do not stop Git operations.
+
+`Skipped ...: no sound mapped` means the event array is empty. An empty template can validate successfully while containing no playable clips. Use folder scaffolding to generate mappings from renamed audio, or populate the template's event arrays manually. Select packs using their lowercase ID, for example `gitsama use bleach`. Use `gitsama pack add`, as `git pack add` is not a Git command.
 
 ### An IDE or coding agent does not play sounds
 
@@ -377,7 +406,7 @@ No Rust toolchain is required when installing a prebuilt release or using a pack
 
 ### Does GitSama watch GitHub?
 
-No. It has no server, polling, remote monitoring, or GitHub API integration.
+No. Git events and playback are handled locally. The explicit `pack contribute` command contacts GitHub to submit a pack PR.
 
 ### Does it add files to my project?
 
@@ -389,7 +418,7 @@ No. Continue using normal Git commands.
 
 ### Can I add sounds from other anime or games?
 
-Yes, as a data-only pack containing media you are legally allowed to use. Scaffold, validate, import, select, and test the pack.
+Yes, as a data-only pack containing media you are legally allowed to use. Put renamed clips in a folder, run `gitsama pack scaffold` there, then run `gitsama test all`.
 
 ### Can sound playback stop a commit or push?
 

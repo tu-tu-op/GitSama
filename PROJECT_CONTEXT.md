@@ -7,7 +7,7 @@
 
 ## 1. Executive Summary
 
-- **What it is**: Zero-daemon, local-only Rust CLI tool playing audio reactions (sound packs) to Git actions.
+- **What it is**: Zero-daemon Rust CLI tool playing local audio reactions (sound packs) to Git actions, with an explicit GitHub pack-contribution command.
 - **What it does**: Intercepts 6 native Git hooks, detects 8 workflow events (commit, push, massive push, merge, branch switch/create/delete, rebase), and plays audio without blocking Git.
 - **How it does it**: Uses Git 2.54+ user-level configured hooks (`hook.*`), detached worker processes (`__play`), an atomic filesystem directory lock (`PlaybackLock`), and a stateful debounce machine to eliminate hook duplicate events.
 
@@ -24,6 +24,7 @@
 | **Platform Bindings** | `windows-sys 0.61` | Win32 ToolHelp32 snapshot (parent PID tracking across MSYS forks) |
 | **Directories** | `dirs 4.0` | Cross-platform resolution of `~/.gitsama` |
 | **Error Handling** | `thiserror 2.0` | Custom strongly typed `Error` enum |
+| **Staging** | `tempfile 3.20` | Validated pack installation and isolated contribution checkouts |
 
 ---
 
@@ -45,6 +46,8 @@ c:\Projects\GitSama\
     ├── push.rs                  # Pre-push stdin parser + local rev-list commit counter (zero network)
     ├── state.rs                 # ~/.gitsama/state file management (atomic claims for pending branches)
     ├── packs.rs                 # Pack manifest validation, traversal protection, audio path resolver
+    ├── pack_state.rs            # Pack creation, completed previews, invitations, and PR records
+    ├── contribute.rs            # Tested pack exports and isolated GitHub PR submission
     ├── config.rs                # ~/.gitsama/config.toml load/save/validate + defaults
     ├── git.rs                   # Git runner, version detection (min 2.54), repo root/identity lookup
     ├── platform.rs              # Win32 vs POSIX: detached spawn, POSIX sh path quoting, PID resolution
@@ -151,7 +154,7 @@ All user state is stored outside project repositories:
 | `~/.gitsama/config.toml` | User settings (active pack, volume 0-100, threshold, mute, per-event toggles) |
 | `~/.gitsama/bin/` | Permanent binary location added to user `PATH` |
 | `~/.gitsama/packs/` | Installed custom and bundled sound packs |
-| `~/.gitsama/state/` | Runtime locks (`playback.lock/`) and debounce tokens (`pending-*.json`) |
+| `~/.gitsama/state/` | Runtime locks, debounce tokens, `pack-*.json` records, and retained failed contributions |
 | `~/.gitsama/logs/gitsama.log` | Diagnostic logging for hook and playback errors |
 | `<repo>/.git/config` | Local opt-out only: `hook.gitsama-*.enabled = false` (via `gitsama off-here`) |
 
@@ -177,6 +180,8 @@ cargo run -- status                   # Inspect global & current repo hook statu
 cargo run -- doctor [--fix]          # Health check & auto-repair hooks/config
 cargo run -- test [event|all]        # Test play sounds
 cargo run -- pack list               # List available sound packs
-cargo run -- pack scaffold <name>    # Create a custom pack template
+cargo run -- pack scaffold [name]    # Install and select event-named audio from the current folder
+cargo run -- pack scaffold --template <name> [parent] # Create an empty pack template
+cargo run -- pack contribute <id>    # Submit a tested custom pack via authenticated GitHub CLI
 cargo run -- off-here / on-here      # Disable / re-enable GitSama in current repo
 ```

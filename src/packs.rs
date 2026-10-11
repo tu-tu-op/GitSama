@@ -595,8 +595,8 @@ pub fn import_folder(
     };
     write_manifest(&root, &manifest)?;
     let readme = format!(
-        "# {name}\n\nEvent mappings were generated from clip filenames.\n\nPreview the installed pack:\n\n    gitsama use {}\n    gitsama test all\n\nOnly contribute audio you have permission to redistribute.\n",
-        manifest.id
+        "# {name}\n\nEvent mappings were generated from clip filenames. Source clips were copied into this installed pack.\n\nPreview the installed pack:\n\n    gitsama use {id}\n    gitsama test all\n\nAfter a successful full preview, share it with:\n\n    gitsama pack contribute {id}\n\nInstall GitHub CLI and authenticate with gh auth login --hostname github.com. Submission collects author, audio license, and source/redistribution details; noninteractive use must supply missing values with --author, --license, and --source.\n\nRepeat gitsama test all after editing pack.toml or referenced audio. Only contribute audio you have permission to redistribute.\n",
+        id = manifest.id
     );
     fs::write(root.join("README.md"), readme).map_err(|source| Error::WriteFile {
         path: root.join("README.md"),
@@ -688,6 +688,11 @@ Validate and install:
     gitsama use {id}
     gitsama test all
 
+After a successful full preview, submit with:
+
+    gitsama pack contribute {id}
+
+Submission needs authenticated GitHub CLI, attribution, licensing, and source/redistribution details.
 Only include audio you are legally allowed to redistribute.
 "
     );

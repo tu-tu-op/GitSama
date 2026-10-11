@@ -24,6 +24,52 @@ gitsama test all
 
 Check the log path printed by gitsama doctor. The audio backend needs an available output device. CI and headless testing can use GITSAMA_TEST_MODE=1.
 
+The preview reports what happened:
+
+| Output | Action |
+| --- | --- |
+| `Played Commit: ...` | The preview clip completed. |
+| `Played Massive Push: ... (fallback to Push)` | Add a massive-push clip if you want a separate sound. |
+| `Skipped ...: no sound mapped` | Add a mapping or scaffold your renamed clips. |
+| `Skipped ...: GitSama is muted` | Run `gitsama unmute`. |
+| `Skipped ...: volume is zero` | Run `gitsama volume 80`. |
+| `Skipped ...: playback queue timed out` | Wait for other playback to finish and retry. |
+| Decoder or audio device error | Check the clip format and the selected output device, then retry. |
+
+A validated empty template has no sound mappings. Running `scaffold --template` creates that template. To install existing event-named clips automatically, open their folder and run `gitsama pack scaffold`, then `gitsama test all`.
+
+## Folder imports
+
+Run `gitsama pack scaffold [name]` in the folder containing WAV, MP3, OGG, or FLAC clips. The optional name overrides the display name. Clips can also be in its direct `audio/` subfolder. The installed path is printed; your source folder stays unchanged.
+
+- **Unmatched filename**: rename supported audio to an event name, such as `commit.mp3` or `branch-switch-1.wav`.
+- **Filename collision**: root and `audio/` clips are copied into one installed audio directory. Give duplicate basenames distinct numbered names; comparisons ignore case.
+- **Reserved ID**: choose a different name than `starter`, `naruto`, or a Windows device name such as `con`.
+- **Already installed**: use another name or explicitly remove the old pack with `gitsama pack remove <id>` before scaffolding again.
+- **Unsafe path**: provide ordinary directories and regular audio files; remove symlinks and traversal paths.
+- **Wrong command or name**: use `gitsama pack add`, and select the lowercase ID with `gitsama use bleach`.
+
+Use `gitsama pack scaffold --template <name> [parent]` for the manual template workflow. Run validation inside the generated pack folder where `pack.toml` exists. For automatic folder imports, the generated manifest is at the printed installed path.
+
+## Voice-pack contributions
+
+The contribution invitation appears once after a locally scaffolded pack's first successful `gitsama test all`. Single-event tests, built-in packs, muted or zero-volume runs, queue timeouts, and playback errors do not trigger it. Partial packs qualify when at least one clip completes and all available event previews finish.
+
+If `pack contribute` requests testing, select the pack and repeat `gitsama test all`. Changes to its installed manifest or referenced clips invalidate the stored preview. A failed full preview also clears the previous success.
+
+If metadata is missing in a noninteractive terminal, supply `--author`, `--license`, and `--source`. Source details must explain the audio's origin and redistribution permission. Placeholder author and license values are not sufficient.
+
+For GitHub CLI errors, install `gh`, then run:
+
+```sh
+gh auth login --hostname github.com
+gh auth status --hostname github.com
+```
+
+For an existing upstream ID, choose a new name. Forks may take time to become available; retry if the command reports that your fork is not ready.
+
+Submission errors print a retained preparation path under GitSama's `state/`. If it contains `RECOVERY.md`, follow those commands to finish the prepared push or PR. Earlier failures can be retried with `gitsama pack contribute <id>` after fixing the cause. A successful submission prints and records its PR URL; repeating the command shows that URL.
+
 ## Git operation still works
 
 This is intentional. GitSama hooks are fail-open. If a pack, state file, log, decoder, or audio device fails, Git continues and the diagnostic log records a short reason.

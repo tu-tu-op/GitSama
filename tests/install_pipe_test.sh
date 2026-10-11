@@ -8,7 +8,8 @@ FIXTURES="$TEMP_ROOT/fixtures"
 BIN="$TEMP_ROOT/mock-bin"
 HOME_DIR="$TEMP_ROOT/home"
 WORK="$TEMP_ROOT/work"
-ASSET="gitsama-v0.1.0-linux-x86_64.tar.gz"
+VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/Cargo.toml" | head -n 1)
+ASSET="gitsama-v$VERSION-linux-x86_64.tar.gz"
 mkdir -p "$FIXTURES" "$BIN" "$HOME_DIR" "$WORK/target/release"
 
 cat > "$FIXTURES/gitsama" <<'EOF'

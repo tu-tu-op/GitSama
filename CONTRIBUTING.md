@@ -27,6 +27,8 @@ Describe the user-visible behavior, the supported platforms you exercised, and t
 
 For bug reports, include the GitSama version, operating system, Git version, command that exposed the issue, and safe output from gitsama doctor. Remove repository names, private URLs, commit messages, credentials, and personal paths before posting.
 
+For versioned binaries and npm packages, see [Release publishing](docs/RELEASING.md).
+
 ## Pack contributions
 
 Packs are data-only directories. Do not add executable files or commands to a manifest. Community pack submissions must include audio the contributor has permission to redistribute, with clear licensing or permission information. Do not submit copyrighted anime dialogue or music without redistribution rights.

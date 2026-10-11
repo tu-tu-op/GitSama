@@ -8,6 +8,7 @@ use rand::random_range;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    config::Config,
     error::{Error, Result},
     events::EventKind,
     logging,
@@ -177,6 +178,12 @@ impl Pack {
 
 pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
     paths.ensure_layout()?;
+    if Config::load_or_default(paths)
+        .removed_builtin_packs
+        .contains(STARTER_ID)
+    {
+        return Ok(());
+    }
     let root = paths.packs.join(STARTER_ID);
     match fs::symlink_metadata(&root) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -267,8 +274,11 @@ pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
 
 pub fn ensure_bundled(paths: &AppPaths) -> Result<()> {
     paths.ensure_layout()?;
+    let removed = Config::load_or_default(paths).removed_builtin_packs;
     for pack in BUNDLED_PACKS {
-        ensure_bundled_pack(paths, pack)?;
+        if !removed.contains(pack.id) {
+            ensure_bundled_pack(paths, pack)?;
+        }
     }
     Ok(())
 }
@@ -348,6 +358,10 @@ fn ensure_directory(path: &Path, label: &str) -> Result<()> {
 pub fn installed(paths: &AppPaths) -> Result<Vec<Pack>> {
     ensure_starter(paths)?;
     ensure_bundled(paths)?;
+    installed_on_disk(paths)
+}
+
+fn installed_on_disk(paths: &AppPaths) -> Result<Vec<Pack>> {
     let entries = fs::read_dir(&paths.packs).map_err(|source| Error::ReadFile {
         path: paths.packs.clone(),
         source,
@@ -374,6 +388,19 @@ pub fn installed(paths: &AppPaths) -> Result<Vec<Pack>> {
     }
     packs.sort_by(|left, right| left.manifest.name.cmp(&right.manifest.name));
     Ok(packs)
+}
+
+pub fn fallback_id(paths: &AppPaths, excluded: &str) -> Result<String> {
+    Ok(installed_on_disk(paths)?
+        .into_iter()
+        .filter(|pack| pack.manifest.id != excluded)
+        .min_by_key(|pack| match pack.manifest.id.as_str() {
+            DEFAULT_PACK_ID => 0,
+            STARTER_ID => 1,
+            _ => 2,
+        })
+        .map(|pack| pack.manifest.id)
+        .unwrap_or_default())
 }
 
 pub fn summary(path: impl AsRef<Path>) -> Result<PackSummary> {
@@ -409,11 +436,6 @@ pub fn install(paths: &AppPaths, source: impl AsRef<Path>) -> Result<PackSummary
 
 pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {
     validate_id(id)?;
-    if is_built_in(id) {
-        return Err(Error::Pack(format!(
-            "the {id} pack is built in and cannot be removed"
-        )));
-    }
     let destination = paths.packs.join(id);
     let metadata = fs::symlink_metadata(&destination).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -425,15 +447,53 @@ pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {
             }
         }
     })?;
-    if !metadata.is_dir() || !destination.starts_with(&paths.packs) {
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(Error::Pack(
             "refusing to remove an unsafe pack path".to_owned(),
         ));
     }
-    fs::remove_dir_all(&destination).map_err(|source| Error::WriteFile {
+    let packs_root = fs::canonicalize(&paths.packs).map_err(|source| Error::ReadFile {
+        path: paths.packs.clone(),
+        source,
+    })?;
+    let destination = fs::canonicalize(&destination).map_err(|source| Error::ReadFile {
         path: destination,
         source,
-    })
+    })?;
+    if destination.parent() != Some(packs_root.as_path()) {
+        return Err(Error::Pack(
+            "refusing to remove a pack outside the installed packs directory".to_owned(),
+        ));
+    }
+    let previous = Config::load_or_default(paths);
+    let mut config = previous.clone();
+    if is_built_in(id) {
+        config.removed_builtin_packs.insert(id.to_owned());
+    }
+    if config.active_pack == id {
+        config.active_pack = fallback_id(paths, id)?;
+        if config.active_pack.is_empty() {
+            config.enabled = false;
+        }
+    }
+    if config != previous {
+        config.save(paths)?;
+    }
+    if let Err(source) = fs::remove_dir_all(&destination) {
+        if config != previous {
+            previous.save(paths).map_err(|error| {
+                Error::message(format!(
+                    "could not remove {}: {source}; could not restore configuration: {error}",
+                    destination.display()
+                ))
+            })?;
+        }
+        return Err(Error::WriteFile {
+            path: destination,
+            source,
+        });
+    }
+    crate::pack_state::remove(paths, id)
 }
 
 pub fn find(paths: &AppPaths, id: &str) -> Result<Pack> {
@@ -442,11 +502,208 @@ pub fn find(paths: &AppPaths, id: &str) -> Result<Pack> {
     Pack::load(path)
 }
 
+/// Build an installed pack from event-named clips without writing to the source.
+pub fn import_folder(
+    paths: &AppPaths,
+    source: impl AsRef<Path>,
+    name: Option<&str>,
+) -> Result<PackSummary> {
+    let source = source.as_ref();
+    let metadata = fs::symlink_metadata(source).map_err(|source_error| Error::ReadFile {
+        path: source.to_path_buf(),
+        source: source_error,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(Error::Pack(
+            "clip folder must be a directory, not a symlink".to_owned(),
+        ));
+    }
+    let source = fs::canonicalize(source).map_err(|source_error| Error::ReadFile {
+        path: source.to_path_buf(),
+        source: source_error,
+    })?;
+    let name = name
+        .or_else(|| source.file_name().and_then(|value| value.to_str()))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            Error::Pack("provide a nonempty pack name: gitsama pack scaffold <name>".to_owned())
+        })?
+        .trim();
+    let id = slugify(name);
+    validate_id(&id)?;
+    if is_built_in(&id) {
+        return Err(Error::Pack(format!(
+            "'{id}' is a built-in pack id; scaffold with a different name"
+        )));
+    }
+    let destination = paths.packs.join(&id);
+    reject_existing(&destination)?;
+
+    let mut clips = BTreeMap::new();
+    let mut unmatched = Vec::new();
+    let mut directories = vec![source.clone()];
+    let audio = source.join("audio");
+    match fs::symlink_metadata(&audio) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(Error::Pack(
+                "audio/ must be a directory, not a symlink".to_owned(),
+            ));
+        }
+        Ok(_) => directories.push(audio),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source_error) => {
+            return Err(Error::ReadFile {
+                path: audio,
+                source: source_error,
+            });
+        }
+    }
+    for directory in directories {
+        for entry in fs::read_dir(&directory).map_err(|source| Error::ReadFile {
+            path: directory.clone(),
+            source,
+        })? {
+            let entry = entry.map_err(|source| Error::ReadFile {
+                path: directory.clone(),
+                source,
+            })?;
+            let path = entry.path();
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !SUPPORTED_EXTENSIONS.contains(&extension.as_str()) {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path).map_err(|source| Error::ReadFile {
+                path: path.clone(),
+                source,
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(Error::Pack(format!(
+                    "audio must be a regular file, not a symlink: {}",
+                    path.display()
+                )));
+            }
+            let filename = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| Error::Pack("audio filenames must be UTF-8".to_owned()))?;
+            let Some(event) = event_from_filename(&path) else {
+                unmatched.push(filename);
+                continue;
+            };
+            let key = filename.to_ascii_lowercase();
+            if clips.insert(key, (event, filename.clone(), path)).is_some() {
+                return Err(Error::Pack(format!(
+                    "audio filename collision: {filename}; rename one of the clips"
+                )));
+            }
+        }
+    }
+    if !unmatched.is_empty() {
+        unmatched.sort();
+        return Err(Error::Pack(format!(
+            "unmatched audio filenames: {}. Rename clips to commit, push, massive-push, merge, branch-switch, branch-create, branch-delete, or rebase (optionally numbered, e.g. commit-1.mp3)",
+            unmatched.join(", ")
+        )));
+    }
+    if clips.is_empty() {
+        return Err(Error::Pack("no event audio found; add WAV, MP3, OGG, or FLAC clips, or use scaffold --template <name> for an empty template".to_owned()));
+    }
+
+    paths.ensure_layout()?;
+    let staging = tempfile::Builder::new()
+        .prefix("pack-import-")
+        .tempdir_in(&paths.state)
+        .map_err(|source| Error::WriteFile {
+            path: paths.state.clone(),
+            source,
+        })?;
+    let root = staging.path().join("pack");
+    fs::create_dir_all(root.join("audio")).map_err(|source| Error::WriteFile {
+        path: root.clone(),
+        source,
+    })?;
+    let mut events: BTreeMap<String, Vec<String>> = EventKind::ALL
+        .into_iter()
+        .map(|event| (event.as_str().to_owned(), Vec::new()))
+        .collect();
+    for (event, filename, path) in clips.values() {
+        let relative = format!("audio/{filename}");
+        let target = root.join(&relative);
+        fs::copy(path, &target).map_err(|source| Error::WriteFile {
+            path: target,
+            source,
+        })?;
+        events
+            .get_mut(event.as_str())
+            .expect("known event")
+            .push(relative);
+    }
+    let manifest = PackManifest {
+        schema_version: PACK_SCHEMA_VERSION,
+        id,
+        name: name.to_owned(),
+        author: "Your Name".to_owned(),
+        version: "1.0.0".to_owned(),
+        description: "A GitSama sound pack.".to_owned(),
+        license: "user-provided".to_owned(),
+        events,
+    };
+    write_manifest(&root, &manifest)?;
+    let readme = format!(
+        "# {name}\n\nEvent mappings were generated from clip filenames. Source clips were copied into this installed pack.\n\nPreview the installed pack:\n\n    gitsama use {id}\n    gitsama test all\n\nAfter a successful full preview, share it with:\n\n    gitsama pack contribute {id}\n\nInstall GitHub CLI and authenticate with gh auth login --hostname github.com. Submission collects author, audio license, and source/redistribution details; noninteractive use must supply missing values with --author, --license, and --source.\n\nRepeat gitsama test all after editing pack.toml or referenced audio. Only contribute audio you have permission to redistribute.\n",
+        id = manifest.id
+    );
+    fs::write(root.join("README.md"), readme).map_err(|source| Error::WriteFile {
+        path: root.join("README.md"),
+        source,
+    })?;
+    Pack::load(&root)?;
+    reject_existing(&destination)?;
+    fs::rename(&root, &destination).map_err(|source| Error::WriteFile {
+        path: destination.clone(),
+        source,
+    })?;
+    summary(destination)
+}
+
+fn reject_existing(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Err(Error::Pack(format!(
+            "destination {} already exists; use a different name or explicitly remove the installed pack first",
+            path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(Error::ReadFile {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn event_from_filename(path: &Path) -> Option<EventKind> {
+    let stem = path.file_stem()?.to_str()?;
+    EventKind::parse(stem).ok().or_else(|| {
+        let (event, number) = stem.rsplit_once(['-', '_'])?;
+        if !number.bytes().all(|value| value.is_ascii_digit()) {
+            return None;
+        }
+        if number.parse::<u32>().ok()? == 0 {
+            return None;
+        }
+        EventKind::parse(event).ok()
+    })
+}
+
 pub fn scaffold(name: &str, parent: impl AsRef<Path>) -> Result<PathBuf> {
     if name.trim().is_empty() {
         return Err(Error::Pack("pack name cannot be empty".to_owned()));
     }
     let id = slugify(name);
+    validate_id(&id)?;
     let parent = parent.as_ref();
     let root = parent.join(&id);
     if fs::symlink_metadata(&root).is_ok() {
@@ -490,6 +747,11 @@ Validate and install:
     gitsama use {id}
     gitsama test all
 
+After a successful full preview, submit with:
+
+    gitsama pack contribute {id}
+
+Submission needs authenticated GitHub CLI, attribution, licensing, and source/redistribution details.
 Only include audio you are legally allowed to redistribute.
 "
     );
@@ -553,7 +815,7 @@ fn validate_manifest(manifest: &PackManifest) -> Result<()> {
 fn validate_id(id: &str) -> Result<()> {
     if !is_valid_id(id) {
         return Err(Error::Pack(format!(
-            "id '{id}' must use lowercase letters, digits, '-' or '_', and cannot start with '-'"
+            "id '{id}' must be 1-64 lowercase letters, digits, '-' or '_', cannot start with '-', and cannot be a reserved Windows device name; choose a different pack name"
         )));
     }
     Ok(())
@@ -569,6 +831,31 @@ pub fn is_valid_id(id: &str) -> bool {
                 || character == '_'
         })
         && !id.starts_with('-')
+        && !matches!(
+            id,
+            "con"
+                | "prn"
+                | "aux"
+                | "nul"
+                | "com1"
+                | "com2"
+                | "com3"
+                | "com4"
+                | "com5"
+                | "com6"
+                | "com7"
+                | "com8"
+                | "com9"
+                | "lpt1"
+                | "lpt2"
+                | "lpt3"
+                | "lpt4"
+                | "lpt5"
+                | "lpt6"
+                | "lpt7"
+                | "lpt8"
+                | "lpt9"
+        )
 }
 
 fn validate_audio_files(root: &Path, manifest: &PackManifest) -> Result<()> {
@@ -673,7 +960,7 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_manifest(root: &Path, manifest: &PackManifest) -> Result<()> {
+pub(crate) fn write_manifest(root: &Path, manifest: &PackManifest) -> Result<()> {
     let text = toml::to_string_pretty(manifest)
         .map_err(|error| Error::Pack(format!("could not serialize manifest: {error}")))?;
     fs::write(root.join("pack.toml"), text).map_err(|source| Error::WriteFile {
@@ -791,6 +1078,161 @@ mod tests {
     fn scaffold_rejects_an_empty_name() {
         let directory = tempfile::tempdir().expect("temp");
         assert!(super::scaffold(" ", directory.path()).is_err());
+    }
+
+    #[test]
+    fn imports_named_clips_without_changing_the_source() {
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("Bleach Bankai");
+        fs::create_dir_all(source.join("audio")).expect("source");
+        fs::write(source.join("Commit-1.WAV"), b"first clip").expect("clip");
+        fs::write(source.join("audio/commit_2.mp3"), b"second clip").expect("clip");
+        fs::write(source.join("branch_switch.ogg"), b"branch clip").expect("clip");
+        fs::write(source.join("push.flac"), b"push clip").expect("clip");
+        fs::write(source.join("private.txt"), b"not pack data").expect("extra");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        let installed = super::import_folder(&paths, &source, None).expect("import");
+        assert_eq!(installed.name, "Bleach Bankai");
+        assert_eq!(installed.id, "bleach-bankai");
+        let pack = super::find(&paths, &installed.id).expect("installed");
+        assert_eq!(pack.files_for(EventKind::Commit).len(), 2);
+        assert_eq!(pack.files_for(EventKind::BranchSwitch).len(), 1);
+        assert!(pack.files_for(EventKind::Merge).is_empty());
+        assert_eq!(
+            pack.resolve(EventKind::MassivePush).expect("fallback").0,
+            EventKind::Push
+        );
+        assert_eq!(
+            fs::read(pack.root.join("audio/Commit-1.WAV")).expect("copied bytes"),
+            b"first clip"
+        );
+        assert!(!pack.root.join("private.txt").exists());
+        assert!(!source.join("pack.toml").exists());
+        assert!(source.join("Commit-1.WAV").exists());
+        assert_eq!(fs::read_dir(&paths.state).expect("state").count(), 0);
+        assert!(super::import_folder(&paths, &source, None).is_err());
+        let renamed = super::import_folder(&paths, &source, Some("Other Pack")).expect("rename");
+        assert_eq!(renamed.id, "other-pack");
+        assert_eq!(renamed.name, "Other Pack");
+    }
+
+    #[test]
+    fn rejects_empty_unmatched_reserved_and_conflicting_imports() {
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("clips");
+        fs::create_dir_all(source.join("audio")).expect("source");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        assert!(super::import_folder(&paths, &source, None).is_err());
+        fs::write(source.join("bankai.mp3"), b"clip").expect("clip");
+        fs::write(source.join("commit.wav"), b"clip").expect("clip");
+        let error = super::import_folder(&paths, &source, None).expect_err("unmatched");
+        assert!(error.to_string().contains("bankai.mp3"));
+        assert!(!paths.root.exists());
+        fs::remove_file(source.join("bankai.mp3")).expect("remove");
+        assert!(super::import_folder(&paths, &source, Some("naruto")).is_err());
+        for reserved in ["Starter", "CON", "NUL", "com1", "LPT9"] {
+            assert!(super::import_folder(&paths, &source, Some(reserved)).is_err());
+        }
+        assert!(super::import_folder(&paths, &source, Some(" ")).is_err());
+        fs::write(source.join("audio/COMMIT.WAV"), b"collision").expect("clip");
+        let error = super::import_folder(&paths, &source, None).expect_err("collision");
+        assert!(error.to_string().contains("collision"));
+        assert!(!paths.root.exists());
+    }
+
+    #[test]
+    fn only_numbered_event_filenames_are_recognized() {
+        for filename in [
+            "commit-0.wav",
+            "commit-+1.wav",
+            "commit-final.mp3",
+            "branch-1.wav",
+        ] {
+            assert!(
+                super::event_from_filename(std::path::Path::new(filename)).is_none(),
+                "{filename}"
+            );
+        }
+        assert_eq!(
+            super::event_from_filename(std::path::Path::new("Branch-Create_12.FLAC")),
+            Some(EventKind::BranchCreate)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_import_rejects_linked_audio() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("clips");
+        fs::create_dir(&source).expect("source");
+        let outside = directory.path().join("outside.wav");
+        fs::write(&outside, b"private audio").expect("outside");
+        symlink(&outside, source.join("commit.wav")).expect("link");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        assert!(super::import_folder(&paths, &source, None).is_err());
+        assert!(!paths.root.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_copy_cleans_up_staging() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("clips");
+        fs::create_dir(&source).expect("source");
+        let clip = source.join("commit.wav");
+        fs::write(&clip, b"clip").expect("clip");
+        let _locked = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&clip)
+            .expect("lock clip");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        assert!(super::import_folder(&paths, &source, None).is_err());
+        assert!(!paths.packs.join("clips").exists());
+        assert_eq!(fs::read_dir(&paths.state).expect("state").count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deletion_rejects_a_pack_link_without_touching_its_target() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        let outside = directory.path().join("outside");
+        fs::create_dir(&outside).expect("outside");
+        fs::write(outside.join("private.txt"), "keep").expect("private");
+        symlink(&outside, paths.packs.join("linked")).expect("link");
+        assert!(super::remove(&paths, "linked").is_err());
+        assert_eq!(
+            fs::read_to_string(outside.join("private.txt")).expect("private"),
+            "keep"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_deletion_restores_selection_and_builtin_preferences() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        super::ensure_starter(&paths).expect("starter");
+        let config = crate::config::Config {
+            active_pack: "starter".to_owned(),
+            ..Default::default()
+        };
+        config.save(&paths).expect("config");
+        let clip = paths.packs.join("starter/audio/commit.wav");
+        let _locked = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&clip)
+            .expect("lock");
+        assert!(super::remove(&paths, "starter").is_err());
+        assert_eq!(crate::config::Config::load_or_default(&paths), config);
+        assert!(clip.exists());
     }
 
     #[test]

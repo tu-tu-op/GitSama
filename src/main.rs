@@ -1,12 +1,14 @@
 mod audio;
 mod cli;
 mod config;
+mod contribute;
 mod doctor;
 mod error;
 mod events;
 mod git;
 mod hooks;
 mod logging;
+mod pack_state;
 mod packs;
 mod paths;
 mod platform;

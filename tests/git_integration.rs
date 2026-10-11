@@ -692,6 +692,7 @@ fn custom_pack_scaffold_import_select_and_test_workflow() {
         &[
             "pack",
             "scaffold",
+            "--template",
             "Custom Pack",
             parent.to_str().expect("parent"),
         ],
@@ -714,6 +715,266 @@ fn custom_pack_scaffold_import_select_and_test_workflow() {
     sandbox.tool_ok(None, &["use", "custom-pack"]);
     sandbox.tool_ok(None, &["test", "commit"]);
     assert_eq!(sandbox.event_names(), vec!["commit"]);
+}
+
+#[test]
+fn scaffold_installs_and_selects_clips_from_the_current_folder() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    sandbox.clear_log();
+    let source = sandbox._directory.path().join("Bleach");
+    fs::create_dir_all(source.join("audio")).expect("source");
+    fs::create_dir(source.join(".git")).expect("unrelated history");
+    let tone = sandbox.home.join("packs/starter/audio/commit.wav");
+    fs::copy(&tone, source.join("commit.wav")).expect("clip");
+    fs::copy(&tone, source.join("audio/push.wav")).expect("clip");
+    fs::write(source.join("private.txt"), "private").expect("extra");
+    let output = sandbox.tool(Some(&source), &["pack", "scaffold"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("Using Bleach (bleach)"));
+    assert!(text.contains("falls back to Push"));
+    assert!(text.contains("Merge: no sound"));
+    assert!(text.contains("gitsama test all"));
+    let installed = sandbox.home.join("packs/bleach");
+    assert!(installed.join("audio/commit.wav").exists());
+    assert!(installed.join("audio/push.wav").exists());
+    assert!(!installed.join("private.txt").exists());
+    assert!(!installed.join(".git").exists());
+    assert!(!source.join("pack.toml").exists());
+    let config = fs::read_to_string(sandbox.home.join("config.toml")).expect("config");
+    assert!(config.contains("active_pack = \"bleach\""));
+    sandbox.tool_ok(
+        None,
+        &["pack", "validate", installed.to_str().expect("path")],
+    );
+    sandbox.tool_ok(None, &["test", "all"]);
+    assert_eq!(sandbox.event_names(), vec!["commit", "push", "push"]);
+    let rename = sandbox.tool(Some(&source), &["pack", "scaffold", "Bankai Pack"]);
+    assert!(
+        rename.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rename.stderr)
+    );
+    assert!(sandbox.home.join("packs/bankai-pack/pack.toml").exists());
+}
+
+#[test]
+fn full_preview_records_only_completed_playback_and_removal_clears_state() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    let source = sandbox._directory.path().join("Preview Pack");
+    fs::create_dir(&source).expect("source");
+    fs::copy(
+        sandbox.home.join("packs/starter/audio/commit.wav"),
+        source.join("commit.wav"),
+    )
+    .expect("tone");
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold"]);
+    let state_path = sandbox.home.join("state/pack-preview-pack.json");
+    let state = || -> Value {
+        serde_json::from_slice(&fs::read(&state_path).expect("state")).expect("json")
+    };
+    assert!(state()["created_locally"].as_bool().expect("created"));
+    assert!(state()["tested_fingerprint"].is_null());
+    sandbox.tool_ok(None, &["test", "commit"]);
+    assert!(state()["tested_fingerprint"].is_null());
+    let preview = sandbox.tool(None, &["test", "all"]);
+    assert!(preview.status.success());
+    let text = String::from_utf8_lossy(&preview.stdout);
+    assert!(text.contains("Played Commit: commit.wav"));
+    assert!(text.contains("Skipped Push: no sound mapped"));
+    assert!(text.contains("Full preview completed"));
+    assert!(state()["tested_fingerprint"].is_string());
+    sandbox.tool_ok(None, &["mute"]);
+    let muted = sandbox.tool(None, &["test", "all"]);
+    assert!(String::from_utf8_lossy(&muted.stdout).contains("GitSama is muted"));
+    assert!(state()["tested_fingerprint"].is_null());
+    sandbox.tool_ok(None, &["unmute"]);
+    sandbox.tool_ok(None, &["volume", "0"]);
+    let silent = sandbox.tool(None, &["test", "all"]);
+    assert!(String::from_utf8_lossy(&silent.stdout).contains("volume is zero"));
+    assert!(state()["tested_fingerprint"].is_null());
+    sandbox.tool_ok(None, &["volume", "80"]);
+    let config_path = sandbox.home.join("config.toml");
+    let config = fs::read_to_string(&config_path).expect("config");
+    fs::write(
+        &config_path,
+        config.replace("queue_max_age_ms = 5000", "queue_max_age_ms = 1"),
+    )
+    .expect("queue cap");
+    let lock = sandbox.home.join("state/playback.lock");
+    fs::create_dir(&lock).expect("lock");
+    fs::write(lock.join("owner_pid"), std::process::id().to_string()).expect("owner");
+    let heartbeat = fs::File::create(lock.join("heartbeat")).expect("heartbeat");
+    heartbeat
+        .set_times(
+            fs::FileTimes::new()
+                .set_modified(std::time::SystemTime::now() + Duration::from_secs(60)),
+        )
+        .expect("fresh heartbeat");
+    drop(heartbeat);
+    let busy = sandbox.tool(None, &["test", "all"]);
+    assert!(String::from_utf8_lossy(&busy.stdout).contains("playback queue timed out"));
+    assert!(state()["tested_fingerprint"].is_null());
+    fs::remove_dir_all(lock).expect("unlock");
+    fs::write(&config_path, config).expect("restore config");
+    let installed_clip = sandbox.home.join("packs/preview-pack/audio/commit.wav");
+    fs::write(&installed_clip, b"corrupt audio").expect("corrupt clip");
+    let broken = sandbox.tool(None, &["test", "all"]);
+    assert!(!broken.status.success());
+    assert!(state()["tested_fingerprint"].is_null());
+    fs::copy(source.join("commit.wav"), installed_clip).expect("repair clip");
+    sandbox.tool_ok(None, &["test", "all"]);
+    assert!(state()["tested_fingerprint"].is_string());
+    sandbox.tool_ok(None, &["pack", "remove", "preview-pack"]);
+    assert!(!state_path.exists());
+}
+
+#[test]
+fn contribution_invitation_requires_a_full_preview_and_appears_once_per_installation() {
+    let sandbox = Sandbox::new();
+    let built_in = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(!String::from_utf8_lossy(&built_in.stdout).contains("pack contribute"));
+    let source = sandbox._directory.path().join("Invitations");
+    fs::create_dir(&source).expect("source");
+    let tone = sandbox.home.join("packs/starter/audio/push.wav");
+    fs::copy(&tone, source.join("push.wav")).expect("clip");
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold"]);
+    let single = sandbox.tool_ok(None, &["test", "push"]);
+    assert!(!String::from_utf8_lossy(&single.stdout).contains("pack contribute"));
+    let untested = sandbox.tool(None, &["pack", "contribute", "invitations"]);
+    assert!(!untested.status.success());
+    assert!(String::from_utf8_lossy(&untested.stderr).contains("gitsama test all"));
+    sandbox.tool_ok(None, &["mute"]);
+    let muted = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(!String::from_utf8_lossy(&muted.stdout).contains("pack contribute"));
+    sandbox.tool_ok(None, &["unmute"]);
+    sandbox.tool_ok(None, &["volume", "0"]);
+    let silent = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(!String::from_utf8_lossy(&silent.stdout).contains("pack contribute"));
+    sandbox.tool_ok(None, &["volume", "80"]);
+    let installed = sandbox.home.join("packs/invitations/audio/push.wav");
+    fs::write(&installed, b"corrupt").expect("corrupt");
+    let failed = sandbox.tool(None, &["test", "all"]);
+    assert!(!failed.status.success());
+    assert!(!String::from_utf8_lossy(&failed.stdout).contains("pack contribute"));
+    fs::copy(&tone, &installed).expect("restore");
+    let full = sandbox.tool_ok(None, &["test", "all"]);
+    let text = String::from_utf8_lossy(&full.stdout);
+    assert!(text.contains("fallback to Push"));
+    assert_eq!(
+        text.matches("gitsama pack contribute invitations").count(),
+        1
+    );
+    let repeat = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(!String::from_utf8_lossy(&repeat.stdout).contains("pack contribute"));
+    let missing = sandbox.tool(None, &["pack", "contribute", "invitations"]);
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("--author"));
+    let missing = sandbox.tool(
+        None,
+        &[
+            "pack",
+            "contribute",
+            "invitations",
+            "--author",
+            "Contributor",
+            "--license",
+            "CC0-1.0",
+        ],
+    );
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("--source"));
+    sandbox.tool_ok(None, &["pack", "remove", "invitations"]);
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold"]);
+    let reinstalled = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(String::from_utf8_lossy(&reinstalled.stdout).contains("pack contribute invitations"));
+}
+
+#[test]
+fn delete_any_pack_preserves_sources_and_remembers_builtin_deletions() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    let source = sandbox._directory.path().join("Delete Pack");
+    fs::create_dir(&source).expect("source");
+    fs::copy(
+        sandbox.home.join("packs/starter/audio/commit.wav"),
+        source.join("commit.wav"),
+    )
+    .expect("source clip");
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold"]);
+    sandbox.tool_ok(None, &["test", "all"]);
+    let deleted = sandbox.tool_ok(None, &["pack", "delete", "delete-pack"]);
+    assert!(String::from_utf8_lossy(&deleted.stdout).contains("Using naruto"));
+    assert!(!sandbox.home.join("packs/delete-pack").exists());
+    assert!(!sandbox.home.join("state/pack-delete-pack.json").exists());
+    assert!(source.join("commit.wav").exists());
+    sandbox.tool_ok(None, &["pack", "remove", "starter"]);
+    assert!(!sandbox.home.join("packs/starter").exists());
+    let last = sandbox.tool_ok(None, &["pack", "delete", "naruto"]);
+    assert!(
+        String::from_utf8_lossy(&last.stdout).contains("No voice packs remain; playback muted")
+    );
+    let config = || -> toml::Value {
+        toml::from_str(&fs::read_to_string(sandbox.home.join("config.toml")).expect("config"))
+            .expect("toml")
+    };
+    assert_eq!(config()["active_pack"].as_str(), Some(""));
+    assert_eq!(config()["enabled"].as_bool(), Some(false));
+    assert_eq!(
+        config()["removed_builtin_packs"]
+            .as_array()
+            .expect("removed")
+            .len(),
+        2
+    );
+    let list = sandbox.tool_ok(None, &["pack", "list"]);
+    assert!(String::from_utf8_lossy(&list.stdout).trim().is_empty());
+    let preview = sandbox.tool(None, &["test", "all"]);
+    assert!(!preview.status.success());
+    assert!(String::from_utf8_lossy(&preview.stderr).contains("no voice pack selected"));
+    let status = sandbox.tool_ok(None, &["status"]);
+    assert!(String::from_utf8_lossy(&status.stdout).contains("Active pack  None"));
+    sandbox.tool_ok(None, &["doctor", "--fix"]);
+    sandbox.tool_ok(None, &["setup"]);
+    assert!(!sandbox.home.join("packs/naruto").exists());
+    assert!(!sandbox.home.join("packs/starter").exists());
+    sandbox.tool_ok(None, &["use", "naruto"]);
+    assert!(sandbox.home.join("packs/naruto/pack.toml").exists());
+    assert!(!sandbox.home.join("packs/starter").exists());
+    assert_eq!(config()["active_pack"].as_str(), Some("naruto"));
+    assert_eq!(config()["enabled"].as_bool(), Some(true));
+    sandbox.tool_ok(None, &["test", "commit"]);
+    sandbox.tool_ok(None, &["pack", "delete", "naruto"]);
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold", "Fresh Pack"]);
+    assert_eq!(config()["active_pack"].as_str(), Some("fresh-pack"));
+    assert_eq!(config()["enabled"].as_bool(), Some(true));
+    sandbox.tool_ok(None, &["test", "all"]);
+    sandbox.tool_ok(None, &["pack", "delete", "fresh-pack"]);
+    sandbox.tool_ok(None, &["use", "starter"]);
+    assert!(sandbox.home.join("packs/starter/pack.toml").exists());
+    assert!(!sandbox.home.join("packs/naruto").exists());
+}
+
+#[test]
+fn delete_rejects_unsafe_or_missing_ids_and_can_remove_a_broken_pack() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    for id in ["../naruto", "naruto/..", "Naruto", "missing-pack"] {
+        let output = sandbox.tool(None, &["pack", "delete", id]);
+        assert!(!output.status.success(), "{id}");
+        assert!(sandbox.home.join("packs/naruto/pack.toml").exists());
+    }
+    let broken = sandbox.home.join("packs/broken");
+    fs::create_dir(&broken).expect("broken pack");
+    fs::write(broken.join("pack.toml"), "invalid TOML").expect("manifest");
+    sandbox.tool_ok(None, &["pack", "delete", "broken"]);
+    assert!(!broken.exists());
 }
 
 #[test]

@@ -9,9 +9,10 @@ use clap::{Parser, Subcommand};
 use crate::{
     audio,
     config::Config,
+    contribute,
     error::{Error, Result},
     events::EventKind,
-    git, hooks, packs,
+    git, hooks, pack_state, packs,
     paths::AppPaths,
     platform,
 };
@@ -97,15 +98,39 @@ pub enum PackCommand {
     Add {
         path: String,
     },
+    #[command(
+        visible_alias = "delete",
+        about = "Delete any installed pack, including built-ins"
+    )]
     Remove {
         id: String,
     },
     Validate {
         path: String,
     },
+    #[command(about = "Submit a tested voice pack as a GitHub pull request")]
+    Contribute {
+        id: String,
+        #[arg(long)]
+        author: Option<String>,
+        #[arg(long, help = "License that permits redistribution of the audio")]
+        license: Option<String>,
+        #[arg(long, help = "Audio sources and redistribution permission details")]
+        source: Option<String>,
+    },
+    #[command(
+        about = "Install event-named clips from the current folder, or create an empty template"
+    )]
     Scaffold {
-        name: String,
+        #[arg(required_if_eq("template", "true"))]
+        name: Option<String>,
+        #[arg(requires = "template")]
         directory: Option<String>,
+        #[arg(
+            long,
+            help = "Create an editable empty pack instead of installing clips"
+        )]
+        template: bool,
     },
 }
 
@@ -137,7 +162,7 @@ pub fn run() -> Result<()> {
             let paths = AppPaths::discover()?;
             let config = Config::load_or_default(&paths);
             match audio::play(&paths, &config, EventKind::parse(&event)?) {
-                Ok(()) => Ok(()),
+                Ok(_) => Ok(()),
                 Err(error) => {
                     audio::log_playback_error(&paths, &error);
                     Ok(())
@@ -168,7 +193,7 @@ fn dashboard() -> Result<()> {
     println!("Anime reactions for your Git workflow.");
     println!();
     println!("Status       {state}");
-    println!("Active Pack  {}", config.active_pack);
+    println!("Active Pack  {}", config.active_pack_label());
     println!("Volume       {}%", config.volume);
     println!("Big Push     {} commits", config.massive_push_threshold);
     println!("Playback     {}", config.playback_mode);
@@ -212,14 +237,17 @@ fn setup() -> Result<()> {
     packs::ensure_bundled(&paths)?;
     let mut config = Config::load_or_default(&paths);
     if packs::find(&paths, &config.active_pack).is_err() {
-        config.active_pack = packs::DEFAULT_PACK_ID.to_owned();
+        config.active_pack = packs::fallback_id(&paths, "")?;
+        if config.active_pack.is_empty() {
+            config.enabled = false;
+        }
     }
 
     println!("GitSama setup");
     println!();
     println!("✓ Git {}", version.short());
     println!("✓ Git 2.54 named hook system");
-    println!("✓ Built-in packs ready");
+    println!("✓ Pack library ready");
     if audio::test_mode() {
         println!("✓ Audio test mode enabled");
     } else {
@@ -265,7 +293,7 @@ fn setup() -> Result<()> {
 
     println!("✓ GitSama hooks registered");
     println!();
-    println!("Active pack: {}", config.active_pack);
+    println!("Active pack: {}", config.active_pack_label());
     println!("Volume: {}%", config.volume);
     println!("Massive push threshold: {}", config.massive_push_threshold);
 
@@ -318,7 +346,7 @@ fn status() -> Result<()> {
     println!("GitSama status");
     println!();
     println!("State        {state}");
-    println!("Active pack  {}", config.active_pack);
+    println!("Active pack  {}", config.active_pack_label());
     println!("Volume       {}%", config.volume);
     println!("Big Push     {} commits", config.massive_push_threshold);
     println!("Playback     {}", config.playback_mode);
@@ -381,7 +409,7 @@ fn settings() -> Result<()> {
 }
 
 fn print_config(config: &Config) {
-    println!("Active Pack          {}", config.active_pack);
+    println!("Active Pack          {}", config.active_pack_label());
     println!("Volume               {}%", config.volume);
     println!(
         "Massive Push         {} commits",
@@ -448,8 +476,19 @@ fn pack_command(command: PackCommand) -> Result<()> {
             Ok(())
         }
         PackCommand::Remove { id } => {
+            let was_active = Config::load_or_default(&paths).active_pack == id;
             packs::remove(&paths, &id)?;
             println!("Removed pack {id}");
+            if was_active {
+                let config = Config::load_or_default(&paths);
+                if config.active_pack.is_empty() {
+                    println!(
+                        "No voice packs remain; playback muted. Install a pack with gitsama pack scaffold, or restore a built-in with gitsama use naruto."
+                    );
+                } else {
+                    println!("✓ Using {}", config.active_pack);
+                }
+            }
             Ok(())
         }
         PackCommand::Validate { path } => {
@@ -457,23 +496,130 @@ fn pack_command(command: PackCommand) -> Result<()> {
             println!("✓ {} ({}) is valid", summary.name, summary.id);
             Ok(())
         }
-        PackCommand::Scaffold { name, directory } => {
-            let parent = directory
-                .map(PathBuf::from)
-                .unwrap_or(env::current_dir().map_err(|error| Error::message(error.to_string()))?);
-            let root = packs::scaffold(&name, parent)?;
-            println!("Created {}", root.display());
+        PackCommand::Contribute {
+            id,
+            author,
+            license,
+            source,
+        } => {
+            packs::find(&paths, &id)?;
+            if let Some(url) = pack_state::load(&paths, &id)?.contribution_url {
+                println!("Pull request: {url}");
+                return Ok(());
+            }
+            let pack = contribute::checked_pack(&paths, &id)?;
+            println!(
+                "Contributing {} ({id}) to tu-tu-op/GitSama.",
+                pack.manifest.name
+            );
+            let metadata = contribute::Metadata {
+                author: contribution_value(
+                    "author",
+                    author.or_else(|| {
+                        (!pack.manifest.author.eq_ignore_ascii_case("Your Name"))
+                            .then_some(pack.manifest.author.clone())
+                    }),
+                    "Pack author: ",
+                )?,
+                license: contribution_value(
+                    "license",
+                    license.or_else(|| {
+                        (!pack.manifest.license.eq_ignore_ascii_case("user-provided"))
+                            .then_some(pack.manifest.license.clone())
+                    }),
+                    "Audio redistribution license: ",
+                )?,
+                source: contribution_value(
+                    "source",
+                    source,
+                    "Audio source URL(s) and redistribution permission details: ",
+                )?,
+            };
+            let url = contribute::submit(&paths, &id, &metadata)?;
+            println!("✓ Pull request: {url}");
+            Ok(())
+        }
+        PackCommand::Scaffold {
+            name,
+            directory,
+            template,
+        } => {
+            let current = env::current_dir().map_err(|error| Error::message(error.to_string()))?;
+            if template {
+                let name = name
+                    .as_deref()
+                    .ok_or_else(|| Error::message("--template requires a pack name"))?;
+                let root = packs::scaffold(name, directory.map(PathBuf::from).unwrap_or(current))?;
+                println!("Created template {}", root.display());
+                return Ok(());
+            }
+            let summary = packs::import_folder(&paths, current, name.as_deref())?;
+            pack_state::save(
+                &paths,
+                &summary.id,
+                &pack_state::PackState {
+                    created_locally: true,
+                    ..Default::default()
+                },
+            )?;
+            println!("✓ Installed {} ({})", summary.name, summary.id);
+            println!("Pack path: {}", paths.packs.join(&summary.id).display());
+            let pack = packs::find(&paths, &summary.id)?;
+            for event in EventKind::ALL {
+                let count = pack.files_for(event).len();
+                if count > 0 {
+                    println!("  {}: {} clip(s)", event.label(), count);
+                } else if event == EventKind::MassivePush
+                    && !pack.files_for(EventKind::Push).is_empty()
+                {
+                    println!("  {}: falls back to Push", event.label());
+                } else {
+                    println!("  {}: no sound", event.label());
+                }
+            }
+            let mut config = Config::load_or_default(&paths);
+            if config.active_pack.is_empty() {
+                config.enabled = true;
+            }
+            config.active_pack = summary.id.clone();
+            config.save(&paths).map_err(|error| Error::message(format!(
+                "pack was installed but could not be selected: {error}; retry with gitsama use {}", summary.id
+            )))?;
+            println!("✓ Using {} ({})", summary.name, summary.id);
+            println!("Preview your pack: gitsama test all");
             Ok(())
         }
     }
 }
 
+fn contribution_value(flag: &str, value: Option<String>, prompt: &str) -> Result<String> {
+    let value = match value {
+        Some(value) => value,
+        None if interactive() => prompt_line(prompt)?,
+        None => {
+            return Err(Error::message(format!(
+                "missing contribution metadata; supply --{flag}"
+            )));
+        }
+    };
+    if value.trim().is_empty() {
+        return Err(Error::message(format!("--{flag} must not be empty")));
+    }
+    Ok(value)
+}
+
 fn use_pack(id: &str) -> Result<()> {
     let paths = AppPaths::discover()?;
+    let mut config = Config::load_or_default(&paths);
+    if config.removed_builtin_packs.remove(id) {
+        config.save(&paths)?;
+    }
     packs::ensure_starter(&paths)?;
     packs::ensure_bundled(&paths)?;
     let pack = packs::find(&paths, id)?;
-    let mut config = Config::load_or_default(&paths);
+    if config.active_pack.is_empty() {
+        config.enabled = true;
+    }
     config.active_pack = pack.manifest.id.clone();
     config.save(&paths)?;
     println!("✓ Using {} ({})", pack.manifest.name, pack.manifest.id);
@@ -486,6 +632,9 @@ fn test_command(value: Option<&str>) -> Result<()> {
     packs::ensure_starter(&paths)?;
     packs::ensure_bundled(&paths)?;
     let config = Config::load_or_default(&paths);
+    if config.active_pack.is_empty() {
+        return Err(Error::Pack("no voice pack selected; install one with gitsama pack scaffold or select/restore one with gitsama use <id>".to_owned()));
+    }
     let value = match value {
         Some(value) => value.to_owned(),
         None if interactive() => {
@@ -508,8 +657,52 @@ fn test_command(value: Option<&str>) -> Result<()> {
     };
 
     if value.eq_ignore_ascii_case("all") {
+        let custom = !packs::is_built_in(&config.active_pack);
+        let mut state = pack_state::load(&paths, &config.active_pack)?;
+        let original = if custom {
+            Some(pack_state::fingerprint(&packs::find(
+                &paths,
+                &config.active_pack,
+            )?)?)
+        } else {
+            None
+        };
+        if custom {
+            state.tested_fingerprint = None;
+            pack_state::save(&paths, &config.active_pack, &state)?;
+        }
+        let mut played = false;
+        let mut complete = true;
         for event in EventKind::ALL {
-            test_one(&paths, &config, event)?;
+            match test_one(&paths, &config, event)? {
+                audio::PlaybackOutcome::Played { .. } => played = true,
+                audio::PlaybackOutcome::Skipped(audio::SkipReason::NoSound) => {}
+                audio::PlaybackOutcome::Skipped(_) => complete = false,
+            }
+        }
+        if custom && played && complete {
+            let pack = packs::find(&paths, &config.active_pack)?;
+            state.tested_fingerprint = Some(pack_state::fingerprint(&pack)?);
+            if state.tested_fingerprint != original {
+                return Err(Error::Pack(
+                    "pack changed during playback; rerun gitsama test all".to_owned(),
+                ));
+            }
+            let invite = state.created_locally
+                && !state.invitation_shown
+                && state.contribution_url.is_none();
+            if invite {
+                state.invitation_shown = true;
+            }
+            pack_state::save(&paths, &config.active_pack, &state)?;
+            println!(
+                "✓ Full preview completed for {} ({})",
+                pack.manifest.name, pack.manifest.id
+            );
+            if invite {
+                println!("Share this voice pack with the GitSama community:");
+                println!("  gitsama pack contribute {}", pack.manifest.id);
+            }
         }
         return Ok(());
     }
@@ -518,16 +711,32 @@ fn test_command(value: Option<&str>) -> Result<()> {
         Ok(index) if (1..=EventKind::ALL.len()).contains(&index) => EventKind::ALL[index - 1],
         _ => EventKind::parse(&value)?,
     };
-    test_one(&paths, &config, event)
+    test_one(&paths, &config, event).map(|_| ())
 }
 
-fn test_one(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
-    println!("  Playing {}", event.label());
-    if audio::test_mode() {
-        audio::dispatch(paths, config, event, audio::DispatchDetails::default())
-    } else {
-        audio::play(paths, config, event)
+fn test_one(paths: &AppPaths, config: &Config, event: EventKind) -> Result<audio::PlaybackOutcome> {
+    let outcome = audio::play(paths, config, event)?;
+    match &outcome {
+        audio::PlaybackOutcome::Played {
+            resolved_event,
+            path,
+        } => {
+            let filename = path.file_name().unwrap_or_default().to_string_lossy();
+            if *resolved_event != event {
+                println!(
+                    "  Played {}: {filename} (fallback to {})",
+                    event.label(),
+                    resolved_event.label()
+                );
+            } else {
+                println!("  Played {}: {filename}", event.label());
+            }
+        }
+        audio::PlaybackOutcome::Skipped(reason) => {
+            println!("  Skipped {}: {}", event.label(), reason.message())
+        }
     }
+    Ok(outcome)
 }
 
 fn set_volume(value: u8) -> Result<()> {
@@ -768,5 +977,54 @@ mod tests {
         assert!(parse_volume("101").is_err());
         assert!(parse_threshold("1").is_ok());
         assert!(parse_threshold("0").is_err());
+    }
+
+    #[test]
+    fn scaffold_import_and_template_arguments_are_distinct() {
+        assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold"]).is_ok());
+        assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold", "Bleach"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "gitsama",
+                "pack",
+                "scaffold",
+                "--template",
+                "Bleach",
+                "packs"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold", "--template"]).is_err());
+        assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold", "Bleach", "packs"]).is_err());
+    }
+
+    #[test]
+    fn contribution_accepts_metadata_flags() {
+        assert!(
+            Cli::try_parse_from([
+                "gitsama",
+                "pack",
+                "contribute",
+                "bleach",
+                "--author",
+                "Contributor",
+                "--license",
+                "CC0-1.0",
+                "--source",
+                "Original recordings"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["gitsama", "pack", "contribute"]).is_err());
+    }
+
+    #[test]
+    fn delete_and_remove_accept_the_same_pack_id() {
+        for command in ["delete", "remove"] {
+            let cli = Cli::try_parse_from(["gitsama", "pack", command, "naruto"]).expect("parse");
+            assert!(matches!(cli.command, Some(Command::Pack {
+                command: super::PackCommand::Remove { id }
+            }) if id == "naruto"));
+        }
     }
 }

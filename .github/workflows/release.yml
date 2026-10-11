@@ -51,11 +51,11 @@ jobs:
       - name: Verify release tag matches package versions
         shell: bash
         run: |
-          cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1 | tr -d '\r')"
           npm_version="$(node -p "require('./npm/package.json').version")"
           test "$GITHUB_REF_NAME" = "v$cargo_version"
           test "$cargo_version" = "$npm_version"
-          test "$(sed -n 's/^\$version = "\([^"]*\)"/\1/p' install.ps1)" = "$cargo_version"
+          test "$(sed -n 's/^\$version = "\([^"]*\)"/\1/p' install.ps1 | tr -d '\r')" = "$cargo_version"
           test "$(sed -n 's/^VERSION="${GITSAMA_VERSION:-\([^}]*\)}"/\1/p' install.sh)" = "$cargo_version"
 
       - name: Require the release commit to be merged into main

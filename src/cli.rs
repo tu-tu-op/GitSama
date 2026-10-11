@@ -103,9 +103,19 @@ pub enum PackCommand {
     Validate {
         path: String,
     },
+    #[command(
+        about = "Install event-named clips from the current folder, or create an empty template"
+    )]
     Scaffold {
-        name: String,
+        #[arg(required_if_eq("template", "true"))]
+        name: Option<String>,
+        #[arg(requires = "template")]
         directory: Option<String>,
+        #[arg(
+            long,
+            help = "Create an editable empty pack instead of installing clips"
+        )]
+        template: bool,
     },
 }
 
@@ -457,12 +467,43 @@ fn pack_command(command: PackCommand) -> Result<()> {
             println!("✓ {} ({}) is valid", summary.name, summary.id);
             Ok(())
         }
-        PackCommand::Scaffold { name, directory } => {
-            let parent = directory
-                .map(PathBuf::from)
-                .unwrap_or(env::current_dir().map_err(|error| Error::message(error.to_string()))?);
-            let root = packs::scaffold(&name, parent)?;
-            println!("Created {}", root.display());
+        PackCommand::Scaffold {
+            name,
+            directory,
+            template,
+        } => {
+            let current = env::current_dir().map_err(|error| Error::message(error.to_string()))?;
+            if template {
+                let name = name
+                    .as_deref()
+                    .ok_or_else(|| Error::message("--template requires a pack name"))?;
+                let root = packs::scaffold(name, directory.map(PathBuf::from).unwrap_or(current))?;
+                println!("Created template {}", root.display());
+                return Ok(());
+            }
+            let summary = packs::import_folder(&paths, current, name.as_deref())?;
+            println!("✓ Installed {} ({})", summary.name, summary.id);
+            println!("Pack path: {}", paths.packs.join(&summary.id).display());
+            let pack = packs::find(&paths, &summary.id)?;
+            for event in EventKind::ALL {
+                let count = pack.files_for(event).len();
+                if count > 0 {
+                    println!("  {}: {} clip(s)", event.label(), count);
+                } else if event == EventKind::MassivePush
+                    && !pack.files_for(EventKind::Push).is_empty()
+                {
+                    println!("  {}: falls back to Push", event.label());
+                } else {
+                    println!("  {}: no sound", event.label());
+                }
+            }
+            let mut config = Config::load_or_default(&paths);
+            config.active_pack = summary.id.clone();
+            config.save(&paths).map_err(|error| Error::message(format!(
+                "pack was installed but could not be selected: {error}; retry with gitsama use {}", summary.id
+            )))?;
+            println!("✓ Using {} ({})", summary.name, summary.id);
+            println!("Preview your pack: gitsama test all");
             Ok(())
         }
     }
@@ -768,5 +809,24 @@ mod tests {
         assert!(parse_volume("101").is_err());
         assert!(parse_threshold("1").is_ok());
         assert!(parse_threshold("0").is_err());
+    }
+
+    #[test]
+    fn scaffold_import_and_template_arguments_are_distinct() {
+        assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold"]).is_ok());
+        assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold", "Bleach"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "gitsama",
+                "pack",
+                "scaffold",
+                "--template",
+                "Bleach",
+                "packs"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold", "--template"]).is_err());
+        assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold", "Bleach", "packs"]).is_err());
     }
 }

@@ -692,6 +692,7 @@ fn custom_pack_scaffold_import_select_and_test_workflow() {
         &[
             "pack",
             "scaffold",
+            "--template",
             "Custom Pack",
             parent.to_str().expect("parent"),
         ],
@@ -714,6 +715,52 @@ fn custom_pack_scaffold_import_select_and_test_workflow() {
     sandbox.tool_ok(None, &["use", "custom-pack"]);
     sandbox.tool_ok(None, &["test", "commit"]);
     assert_eq!(sandbox.event_names(), vec!["commit"]);
+}
+
+#[test]
+fn scaffold_installs_and_selects_clips_from_the_current_folder() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    sandbox.clear_log();
+    let source = sandbox._directory.path().join("Bleach");
+    fs::create_dir_all(source.join("audio")).expect("source");
+    fs::create_dir(source.join(".git")).expect("unrelated history");
+    let tone = sandbox.home.join("packs/starter/audio/commit.wav");
+    fs::copy(&tone, source.join("commit.wav")).expect("clip");
+    fs::copy(&tone, source.join("audio/push.wav")).expect("clip");
+    fs::write(source.join("private.txt"), "private").expect("extra");
+    let output = sandbox.tool(Some(&source), &["pack", "scaffold"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("Using Bleach (bleach)"));
+    assert!(text.contains("falls back to Push"));
+    assert!(text.contains("Merge: no sound"));
+    assert!(text.contains("gitsama test all"));
+    let installed = sandbox.home.join("packs/bleach");
+    assert!(installed.join("audio/commit.wav").exists());
+    assert!(installed.join("audio/push.wav").exists());
+    assert!(!installed.join("private.txt").exists());
+    assert!(!installed.join(".git").exists());
+    assert!(!source.join("pack.toml").exists());
+    let config = fs::read_to_string(sandbox.home.join("config.toml")).expect("config");
+    assert!(config.contains("active_pack = \"bleach\""));
+    sandbox.tool_ok(
+        None,
+        &["pack", "validate", installed.to_str().expect("path")],
+    );
+    sandbox.tool_ok(None, &["test", "all"]);
+    assert_eq!(sandbox.event_names(), vec!["commit", "push", "push"]);
+    let rename = sandbox.tool(Some(&source), &["pack", "scaffold", "Bankai Pack"]);
+    assert!(
+        rename.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rename.stderr)
+    );
+    assert!(sandbox.home.join("packs/bankai-pack/pack.toml").exists());
 }
 
 #[test]

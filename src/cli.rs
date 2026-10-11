@@ -14,7 +14,7 @@ use crate::{
     events::EventKind,
     git, hooks, pack_state, packs,
     paths::AppPaths,
-    platform,
+    platform, update,
 };
 
 #[derive(Debug, Parser)]
@@ -25,12 +25,24 @@ use crate::{
     long_about = "GitSama reacts to meaningful local Git events with sounds from your selected pack."
 )]
 pub struct Cli {
+    #[arg(long, help = "Check for and install the latest GitSama release")]
+    pub upgrade: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    #[command(
+        visible_alias = "update",
+        about = "Check for and install GitSama updates"
+    )]
+    Upgrade {
+        #[arg(long, conflicts_with = "yes", help = "Check without installing")]
+        check: bool,
+        #[arg(long, help = "Approve installation without prompting")]
+        yes: bool,
+    },
     Setup,
     Status,
     Settings,
@@ -136,7 +148,26 @@ pub enum PackCommand {
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
-    match cli.command {
+    if cli.upgrade {
+        if cli.command.is_some() {
+            return Err(Error::message(
+                "run gitsama --upgrade on its own, or use gitsama upgrade",
+            ));
+        }
+        return update::run(false, false);
+    }
+    let notify = !matches!(
+        &cli.command,
+        Some(
+            Command::Upgrade { .. }
+                | Command::Uninstall { .. }
+                | Command::Hook { .. }
+                | Command::Play { .. }
+                | Command::DispatchPending { .. }
+        )
+    );
+    let result = match cli.command {
+        Some(Command::Upgrade { check, yes }) => update::run(check, yes),
         None => dashboard(),
         Some(Command::Setup) => setup(),
         Some(Command::Status) => status(),
@@ -172,7 +203,11 @@ pub fn run() -> Result<()> {
         Some(Command::DispatchPending { repository, branch }) => {
             hooks::run_pending_fail_open(&repository, &branch)
         }
+    };
+    if result.is_ok() && notify {
+        update::notify()?;
     }
+    result
 }
 
 fn dashboard() -> Result<()> {
@@ -913,7 +948,7 @@ fn uninstall(keep_data: bool) -> Result<()> {
     Ok(())
 }
 
-fn interactive() -> bool {
+pub(crate) fn interactive() -> bool {
     io::stdin().is_terminal()
         && io::stdout().is_terminal()
         && env::var("GITSAMA_NONINTERACTIVE").is_err()
@@ -940,7 +975,7 @@ fn prompt_optional(prompt: &str) -> Result<Option<String>> {
     }
 }
 
-fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
+pub(crate) fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
     let value = prompt_line(prompt)?;
     if value.is_empty() {
         return Ok(default);

@@ -1,6 +1,6 @@
 {
   "name": "gitsama",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Anime reactions for your Git workflow",
   "license": "MIT",
   "repository": {
@@ -23,6 +23,7 @@
   "files": [
     "bin/gitsama.js",
     "scripts/postinstall.js",
+    "scripts/upgrade.js",
     "scripts/preuninstall.js"
   ],
   "scripts": {

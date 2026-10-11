@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 use crate::{
     audio,
     config::Config,
+    contribute,
     error::{Error, Result},
     events::EventKind,
     git, hooks, pack_state, packs,
@@ -102,6 +103,16 @@ pub enum PackCommand {
     },
     Validate {
         path: String,
+    },
+    #[command(about = "Submit a tested voice pack as a GitHub pull request")]
+    Contribute {
+        id: String,
+        #[arg(long)]
+        author: Option<String>,
+        #[arg(long, help = "License that permits redistribution of the audio")]
+        license: Option<String>,
+        #[arg(long, help = "Audio sources and redistribution permission details")]
+        source: Option<String>,
     },
     #[command(
         about = "Install event-named clips from the current folder, or create an empty template"
@@ -467,6 +478,49 @@ fn pack_command(command: PackCommand) -> Result<()> {
             println!("✓ {} ({}) is valid", summary.name, summary.id);
             Ok(())
         }
+        PackCommand::Contribute {
+            id,
+            author,
+            license,
+            source,
+        } => {
+            packs::find(&paths, &id)?;
+            if let Some(url) = pack_state::load(&paths, &id)?.contribution_url {
+                println!("Pull request: {url}");
+                return Ok(());
+            }
+            let pack = contribute::checked_pack(&paths, &id)?;
+            println!(
+                "Contributing {} ({id}) to tu-tu-op/GitSama.",
+                pack.manifest.name
+            );
+            let metadata = contribute::Metadata {
+                author: contribution_value(
+                    "author",
+                    author.or_else(|| {
+                        (!pack.manifest.author.eq_ignore_ascii_case("Your Name"))
+                            .then_some(pack.manifest.author.clone())
+                    }),
+                    "Pack author: ",
+                )?,
+                license: contribution_value(
+                    "license",
+                    license.or_else(|| {
+                        (!pack.manifest.license.eq_ignore_ascii_case("user-provided"))
+                            .then_some(pack.manifest.license.clone())
+                    }),
+                    "Audio redistribution license: ",
+                )?,
+                source: contribution_value(
+                    "source",
+                    source,
+                    "Audio source URL(s) and redistribution permission details: ",
+                )?,
+            };
+            let url = contribute::submit(&paths, &id, &metadata)?;
+            println!("✓ Pull request: {url}");
+            Ok(())
+        }
         PackCommand::Scaffold {
             name,
             directory,
@@ -515,6 +569,22 @@ fn pack_command(command: PackCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn contribution_value(flag: &str, value: Option<String>, prompt: &str) -> Result<String> {
+    let value = match value {
+        Some(value) => value,
+        None if interactive() => prompt_line(prompt)?,
+        None => {
+            return Err(Error::message(format!(
+                "missing contribution metadata; supply --{flag}"
+            )));
+        }
+    };
+    if value.trim().is_empty() {
+        return Err(Error::message(format!("--{flag} must not be empty")));
+    }
+    Ok(value)
 }
 
 fn use_pack(id: &str) -> Result<()> {
@@ -588,11 +658,21 @@ fn test_command(value: Option<&str>) -> Result<()> {
                     "pack changed during playback; rerun gitsama test all".to_owned(),
                 ));
             }
+            let invite = state.created_locally
+                && !state.invitation_shown
+                && state.contribution_url.is_none();
+            if invite {
+                state.invitation_shown = true;
+            }
             pack_state::save(&paths, &config.active_pack, &state)?;
             println!(
                 "✓ Full preview completed for {} ({})",
                 pack.manifest.name, pack.manifest.id
             );
+            if invite {
+                println!("Share this voice pack with the GitSama community:");
+                println!("  gitsama pack contribute {}", pack.manifest.id);
+            }
         }
         return Ok(());
     }
@@ -886,5 +966,25 @@ mod tests {
         );
         assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold", "--template"]).is_err());
         assert!(Cli::try_parse_from(["gitsama", "pack", "scaffold", "Bleach", "packs"]).is_err());
+    }
+
+    #[test]
+    fn contribution_accepts_metadata_flags() {
+        assert!(
+            Cli::try_parse_from([
+                "gitsama",
+                "pack",
+                "contribute",
+                "bleach",
+                "--author",
+                "Contributor",
+                "--license",
+                "CC0-1.0",
+                "--source",
+                "Original recordings"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["gitsama", "pack", "contribute"]).is_err());
     }
 }

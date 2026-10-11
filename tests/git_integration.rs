@@ -836,6 +836,67 @@ fn full_preview_records_only_completed_playback_and_removal_clears_state() {
 }
 
 #[test]
+fn contribution_invitation_requires_a_full_preview_and_appears_once_per_installation() {
+    let sandbox = Sandbox::new();
+    let built_in = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(!String::from_utf8_lossy(&built_in.stdout).contains("pack contribute"));
+    let source = sandbox._directory.path().join("Invitations");
+    fs::create_dir(&source).expect("source");
+    let tone = sandbox.home.join("packs/starter/audio/push.wav");
+    fs::copy(&tone, source.join("push.wav")).expect("clip");
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold"]);
+    let single = sandbox.tool_ok(None, &["test", "push"]);
+    assert!(!String::from_utf8_lossy(&single.stdout).contains("pack contribute"));
+    let untested = sandbox.tool(None, &["pack", "contribute", "invitations"]);
+    assert!(!untested.status.success());
+    assert!(String::from_utf8_lossy(&untested.stderr).contains("gitsama test all"));
+    sandbox.tool_ok(None, &["mute"]);
+    let muted = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(!String::from_utf8_lossy(&muted.stdout).contains("pack contribute"));
+    sandbox.tool_ok(None, &["unmute"]);
+    sandbox.tool_ok(None, &["volume", "0"]);
+    let silent = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(!String::from_utf8_lossy(&silent.stdout).contains("pack contribute"));
+    sandbox.tool_ok(None, &["volume", "80"]);
+    let installed = sandbox.home.join("packs/invitations/audio/push.wav");
+    fs::write(&installed, b"corrupt").expect("corrupt");
+    let failed = sandbox.tool(None, &["test", "all"]);
+    assert!(!failed.status.success());
+    assert!(!String::from_utf8_lossy(&failed.stdout).contains("pack contribute"));
+    fs::copy(&tone, &installed).expect("restore");
+    let full = sandbox.tool_ok(None, &["test", "all"]);
+    let text = String::from_utf8_lossy(&full.stdout);
+    assert!(text.contains("fallback to Push"));
+    assert_eq!(
+        text.matches("gitsama pack contribute invitations").count(),
+        1
+    );
+    let repeat = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(!String::from_utf8_lossy(&repeat.stdout).contains("pack contribute"));
+    let missing = sandbox.tool(None, &["pack", "contribute", "invitations"]);
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("--author"));
+    let missing = sandbox.tool(
+        None,
+        &[
+            "pack",
+            "contribute",
+            "invitations",
+            "--author",
+            "Contributor",
+            "--license",
+            "CC0-1.0",
+        ],
+    );
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("--source"));
+    sandbox.tool_ok(None, &["pack", "remove", "invitations"]);
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold"]);
+    let reinstalled = sandbox.tool_ok(None, &["test", "all"]);
+    assert!(String::from_utf8_lossy(&reinstalled.stdout).contains("pack contribute invitations"));
+}
+
+#[test]
 fn malformed_runtime_state_cannot_fail_a_hook() {
     let sandbox = Sandbox::new();
     fs::create_dir_all(&sandbox.home).expect("home");

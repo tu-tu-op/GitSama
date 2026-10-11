@@ -751,7 +751,7 @@ fn validate_manifest(manifest: &PackManifest) -> Result<()> {
 fn validate_id(id: &str) -> Result<()> {
     if !is_valid_id(id) {
         return Err(Error::Pack(format!(
-            "id '{id}' must use lowercase letters, digits, '-' or '_', and cannot start with '-'"
+            "id '{id}' must be 1-64 lowercase letters, digits, '-' or '_', cannot start with '-', and cannot be a reserved Windows device name; choose a different pack name"
         )));
     }
     Ok(())
@@ -767,6 +767,31 @@ pub fn is_valid_id(id: &str) -> bool {
                 || character == '_'
         })
         && !id.starts_with('-')
+        && !matches!(
+            id,
+            "con"
+                | "prn"
+                | "aux"
+                | "nul"
+                | "com1"
+                | "com2"
+                | "com3"
+                | "com4"
+                | "com5"
+                | "com6"
+                | "com7"
+                | "com8"
+                | "com9"
+                | "lpt1"
+                | "lpt2"
+                | "lpt3"
+                | "lpt4"
+                | "lpt5"
+                | "lpt6"
+                | "lpt7"
+                | "lpt8"
+                | "lpt9"
+        )
 }
 
 fn validate_audio_files(root: &Path, manifest: &PackManifest) -> Result<()> {
@@ -871,7 +896,7 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_manifest(root: &Path, manifest: &PackManifest) -> Result<()> {
+pub(crate) fn write_manifest(root: &Path, manifest: &PackManifest) -> Result<()> {
     let text = toml::to_string_pretty(manifest)
         .map_err(|error| Error::Pack(format!("could not serialize manifest: {error}")))?;
     fs::write(root.join("pack.toml"), text).map_err(|source| Error::WriteFile {
@@ -1041,6 +1066,9 @@ mod tests {
         assert!(!paths.root.exists());
         fs::remove_file(source.join("bankai.mp3")).expect("remove");
         assert!(super::import_folder(&paths, &source, Some("naruto")).is_err());
+        for reserved in ["Starter", "CON", "NUL", "com1", "LPT9"] {
+            assert!(super::import_folder(&paths, &source, Some(reserved)).is_err());
+        }
         assert!(super::import_folder(&paths, &source, Some(" ")).is_err());
         fs::write(source.join("audio/COMMIT.WAV"), b"collision").expect("clip");
         let error = super::import_folder(&paths, &source, None).expect_err("collision");

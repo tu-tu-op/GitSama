@@ -107,7 +107,64 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    run_command(directory, args, None)
+}
+
+pub fn run_isolated<I, S>(directory: &Path, args: I, empty_config: &Path) -> Result<GitOutput>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    run_command(Some(directory), args, Some(empty_config))
+}
+
+fn run_command<I, S>(
+    directory: Option<&Path>,
+    args: I,
+    empty_config: Option<&Path>,
+) -> Result<GitOutput>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let mut command = Command::new(git_binary());
+    if let Some(empty_config) = empty_config {
+        for key in [
+            "GIT_DIR",
+            "GIT_COMMON_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_CONFIG",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_AUTHOR_DATE",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+            "GIT_COMMITTER_DATE",
+            "GIT_TEMPLATE_DIR",
+            "GIT_NAMESPACE",
+            "GIT_SHALLOW_FILE",
+            "GIT_GRAFT_FILE",
+        ] {
+            command.env_remove(key);
+        }
+        command
+            .env("GIT_CONFIG_GLOBAL", empty_config)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_COUNT", "0")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .args([
+                "-c",
+                "init.templateDir=",
+                "-c",
+                "credential.helper=",
+                "-c",
+                "credential.https://github.com.helper=!gh auth git-credential",
+            ]);
+    }
     command.args(args);
     if let Some(directory) = directory {
         command.current_dir(directory);

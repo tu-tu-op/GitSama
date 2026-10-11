@@ -1,6 +1,7 @@
 mod audio;
 mod cli;
 mod config;
+mod contribute;
 mod doctor;
 mod error;
 mod events;

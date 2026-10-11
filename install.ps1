@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $repository = "tu-tu-op/GitSama"
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $manifestPath = Join-Path $scriptDirectory "Cargo.toml"
-$version = "0.1.0"
+$version = "0.1.1"
 if (Test-Path $manifestPath) {
     $versionLine = Select-String -Path $manifestPath -Pattern '^version = "([^"]+)"' | Select-Object -First 1
     if ($versionLine) {
@@ -32,35 +32,33 @@ $binDirectory = Join-Path $installRoot "bin"
 $source = Join-Path $scriptDirectory "target\release\gitsama.exe"
 $tempDirectory = $null
 try {
-    if (-not (Test-Path $source)) {
-        $cargo = Get-Command cargo -ErrorAction SilentlyContinue
-        if ($cargo) {
-            Write-Host "Building GitSama from source..."
-            & cargo build --locked --release --manifest-path $manifestPath
-            if ($LASTEXITCODE -ne 0) {
-                throw "Cargo could not build GitSama."
-            }
-        } else {
-            if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne "X64") {
-                throw "No Windows release asset is available for this architecture. Install Rust and Cargo, then retry."
-            }
-            $asset = "gitsama-v$version-windows-x86_64.zip"
-            $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("gitsama-" + [Guid]::NewGuid())
-            New-Item -ItemType Directory -Path $tempDirectory | Out-Null
-            $archive = Join-Path $tempDirectory $asset
-            $url = "https://github.com/$repository/releases/download/v$version/$asset"
-            Write-Host "Downloading $url"
-            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive
-            $checksumPath = "$archive.sha256"
-            Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256" -OutFile $checksumPath
-            $expectedHash = (Get-Content -LiteralPath $checksumPath).Trim().Split()[0]
-            $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash
-            if ($expectedHash -ine $actualHash) {
-                throw "The downloaded GitSama archive failed its SHA-256 checksum."
-            }
-            Expand-Archive -LiteralPath $archive -DestinationPath $tempDirectory
-            $source = Join-Path $tempDirectory "gitsama.exe"
+    $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+    if ((Test-Path $manifestPath) -and $cargo) {
+        Write-Host "Building GitSama from source..."
+        & cargo build --locked --release --manifest-path $manifestPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Cargo could not build GitSama."
         }
+    } elseif (-not (Test-Path $source)) {
+        if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne "X64") {
+            throw "No Windows release asset is available for this architecture. Install Rust and Cargo, then retry."
+        }
+        $asset = "gitsama-v$version-windows-x86_64.zip"
+        $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("gitsama-" + [Guid]::NewGuid())
+        New-Item -ItemType Directory -Path $tempDirectory | Out-Null
+        $archive = Join-Path $tempDirectory $asset
+        $url = "https://github.com/$repository/releases/download/v$version/$asset"
+        Write-Host "Downloading $url"
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive
+        $checksumPath = "$archive.sha256"
+        Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256" -OutFile $checksumPath
+        $expectedHash = (Get-Content -LiteralPath $checksumPath).Trim().Split()[0]
+        $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash
+        if ($expectedHash -ine $actualHash) {
+            throw "The downloaded GitSama archive failed its SHA-256 checksum."
+        }
+        Expand-Archive -LiteralPath $archive -DestinationPath $tempDirectory
+        $source = Join-Path $tempDirectory "gitsama.exe"
     }
 
     if (-not (Test-Path $source)) {

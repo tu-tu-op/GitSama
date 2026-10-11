@@ -2,6 +2,17 @@
 
 All notable GitSama changes are recorded here.
 
+## 0.1.1
+
+- Import folders of event-named WAV, MP3, OGG, or FLAC clips with `pack scaffold`; install and select the resulting pack automatically.
+- Report completed, missing, fallback, and skipped playback accurately during previews.
+- Invite creators to contribute after a successful full preview and submit only the tested pack through an isolated GitHub PR.
+- Delete any installed voice pack, including built-ins, with `pack delete`; preserve source clips and support explicit restoration.
+- Offer newer stable versions after interactive commands, with daily checks and an optional update prompt.
+- Add `gitsama --upgrade` and `gitsama upgrade --check` / `--yes`, preserving packs and settings during upgrades.
+- Keep package versions and installer defaults aligned; publish npm after release binaries are available, with optional trusted publishing in CI.
+- Rebuild source installations when rerunning an installer so an old build cannot hide new changes.
+
 ## 0.1.0
 
 Initial release:

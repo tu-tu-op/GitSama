@@ -13,3 +13,25 @@ not required. The binary includes the default Naruto voice pack.
 After installation, run `gitsama doctor` to verify the setup. For all commands,
 custom sound packs, supported platforms, and source installation, see the
 [GitSama README](https://github.com/tu-tu-op/GitSama#readme).
+
+## Updates
+
+GitSama checks for updates after interactive commands, at most once a day. When
+a new stable release is available, it asks whether you want to update. Accepting
+updates the global npm package after the native binary exits, preserving your
+voice packs and settings.
+
+```sh
+gitsama --upgrade
+gitsama upgrade --check
+```
+
+Version 0.1.0 users need one npm update to obtain this command:
+
+```sh
+npm install --global gitsama@latest
+```
+
+Set `GITSAMA_NO_UPDATE_CHECK=1` to disable automatic checks. Hooks and
+noninteractive commands do not check automatically. Local npm installations
+print the update command to run in their project.

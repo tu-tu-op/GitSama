@@ -16,21 +16,21 @@ test('npm and Rust package versions match', () => {
 
 test('maps supported Windows and macOS builds to release assets', () => {
   assert.deepEqual(releaseAsset('win32', 'x64'), {
-    asset: 'gitsama-v0.1.0-windows-x86_64.exe',
+    asset: `gitsama-v${npmVersion}-windows-x86_64.exe`,
     executable: 'gitsama.exe',
   });
   assert.deepEqual(releaseAsset('darwin', 'arm64'), {
-    asset: 'gitsama-v0.1.0-macos-aarch64',
+    asset: `gitsama-v${npmVersion}-macos-aarch64`,
     executable: 'gitsama',
   });
   assert.deepEqual(releaseAsset('darwin', 'x64'), {
-    asset: 'gitsama-v0.1.0-macos-x86_64',
+    asset: `gitsama-v${npmVersion}-macos-x86_64`,
     executable: 'gitsama',
   });
 });
 
 test('maps Linux x64 and rejects unbuilt targets', () => {
-  assert.equal(releaseAsset('linux', 'x64').asset, 'gitsama-v0.1.0-linux-x86_64');
+  assert.equal(releaseAsset('linux', 'x64').asset, `gitsama-v${npmVersion}-linux-x86_64`);
   assert.throws(() => releaseAsset('linux', 'arm64'), /No prebuilt/);
   assert.throws(() => releaseAsset('win32', 'arm64'), /No prebuilt/);
 });

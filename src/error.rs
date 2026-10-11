@@ -33,6 +33,9 @@ pub enum Error {
 
     #[error("GitSama requires Git 2.54 or newer (detected {0})")]
     UnsupportedGit(String),
+
+    #[error("npm upgrade requested")]
+    NpmUpgradeRequested,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

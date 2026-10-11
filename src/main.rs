@@ -14,6 +14,7 @@ mod paths;
 mod platform;
 mod push;
 mod state;
+mod update;
 
 fn main() {
     let result = std::panic::catch_unwind(cli::run);
@@ -21,6 +22,9 @@ fn main() {
     let code = match result {
         Ok(Ok(())) => 0,
         Ok(Err(error)) => {
+            if matches!(error, crate::error::Error::NpmUpgradeRequested) {
+                std::process::exit(75);
+            }
             if !matches!(error, crate::error::Error::UnsupportedGit(_)) {
                 eprintln!("GitSama: {error}");
             }

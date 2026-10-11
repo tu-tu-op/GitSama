@@ -8,6 +8,27 @@ gitsama status
 gitsama test commit
 ```
 
+## Updates
+
+Version 0.1.0 does not recognize `gitsama --upgrade`. Update once through npm
+(`npm install --global gitsama@latest`) or pull the source and rerun its installer.
+
+Automatic notifications require an interactive terminal and a successful
+command. They are limited to one check per day and one offer per new version.
+They are skipped in hooks, audio workers, scripts, help/version output, and
+uninstallation. `GITSAMA_NO_UPDATE_CHECK=1` disables automatic checks.
+
+Run `gitsama upgrade --check` for an immediate check. It also reports network or
+GitHub errors that automatic checks leave quiet. If you declined an offer, use
+`gitsama upgrade` later; a declined version is not offered again automatically.
+
+A checksum, download, platform, or binary-version failure cancels replacement.
+For an npm installation, the advertised version must also be published on npm;
+if publishing is still in progress, wait and retry. A local npm installation
+needs an update in its project, and a Homebrew installation uses its formula.
+
+See [Release publishing](RELEASING.md) for maintainer setup and release recovery.
+
 ## Git version
 
 GitSama requires Git 2.54 or newer. If setup detects an older version, upgrade Git and rerun gitsama setup. No GitSama hook configuration is written when the check fails.

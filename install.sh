@@ -9,7 +9,7 @@ if [ -z "$USER_HOME" ]; then
 fi
 INSTALL_ROOT="$USER_HOME/.gitsama"
 BIN_DIR="$INSTALL_ROOT/bin"
-VERSION="${GITSAMA_VERSION:-0.1.0}"
+VERSION="${GITSAMA_VERSION:-0.1.1}"
 SCRIPT_DIR=""
 if [ -f "$0" ]; then
   SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -41,11 +41,11 @@ if [ "$GIT_MAJOR" -lt 2 ] || { [ "$GIT_MAJOR" -eq 2 ] && [ "$GIT_MINOR" -lt 54 ]
 fi
 
 SOURCE=""
-if [ "$SOURCE_CHECKOUT" -eq 1 ] && [ -x "$SCRIPT_DIR/target/release/gitsama" ]; then
-  SOURCE="$SCRIPT_DIR/target/release/gitsama"
-elif [ "$SOURCE_CHECKOUT" -eq 1 ] && command -v cargo >/dev/null 2>&1; then
+if [ "$SOURCE_CHECKOUT" -eq 1 ] && command -v cargo >/dev/null 2>&1; then
   echo "Building GitSama from source..."
   cargo build --locked --release --manifest-path "$SCRIPT_DIR/Cargo.toml"
+  SOURCE="$SCRIPT_DIR/target/release/gitsama"
+elif [ "$SOURCE_CHECKOUT" -eq 1 ] && [ -x "$SCRIPT_DIR/target/release/gitsama" ]; then
   SOURCE="$SCRIPT_DIR/target/release/gitsama"
 else
   OS_NAME=$(uname -s)

@@ -4,13 +4,13 @@ GitSama plays a sound when something important happens in your local Git workflo
 
 Install it once and keep using Git normally. GitSama works below your terminal, editor, or coding agent through Git's configured hooks.
 
-[Install](#install) · [Create a voice pack](#create-a-voice-pack-from-your-clips) · [Delete or restore a pack](#delete-or-restore-a-voice-pack) · [Share a pack](#share-a-voice-pack-optional) · [Troubleshooting](#troubleshooting)
+[Install](#install) · [Update](#update-gitsama) · [Create a voice pack](#create-a-voice-pack-from-your-clips) · [Delete or restore a pack](#delete-or-restore-a-voice-pack) · [Share a pack](#share-a-voice-pack-optional) · [Troubleshooting](#troubleshooting)
 
 ## Install
 
 GitSama is installed once per user. It does not add files to your repositories. Packaged installs use prebuilt binaries, so Rust is not required. All install methods require Git 2.54 or newer.
 
-The npm package and Homebrew tap are being prepared for the first public release. Until they are published, use the source installers below.
+The npm package is available. The Homebrew tap is not published yet; macOS users can use npm or the source installer below.
 
 ### npm (Windows, macOS, and Linux)
 
@@ -31,7 +31,7 @@ npm install --global gitsama
 ### macOS
 
 ~~~sh
-brew install tu-tu-op/tap/gitsama
+npm install --global gitsama
 ~~~
 
 ### Linux
@@ -82,6 +82,41 @@ gitsama test all
 
 gitsama doctor checks Git, the installed binary, sound output, the active pack, and every GitSama hook. gitsama test all previews each event and reports completed playback, missing sounds, fallback playback, and skips.
 
+## Update GitSama
+
+After an interactive command such as `gitsama pack scaffold` or `gitsama status` finishes, GitSama checks for a newer stable release. It checks at most once a day and offers each new version once:
+
+~~~text
+GitSama 0.1.2 is available (you have 0.1.1).
+Would you like to update now? [y/N]
+~~~
+
+Type `y` to update, or press Enter to continue using your current version. You can also update whenever you want:
+
+~~~sh
+gitsama --upgrade
+~~~
+
+Other update commands:
+
+| Command | What it does |
+| --- | --- |
+| `gitsama upgrade` | Check now and ask before installing an update. |
+| `gitsama upgrade --check` | Check now without installing anything. |
+| `gitsama upgrade --yes` | Approve installation without a prompt, including in scripts. |
+
+For a source or standalone installation, GitSama downloads the official binary for your platform, checks its SHA-256 checksum and version, and replaces the executable. For a global npm installation, it updates the whole npm package after the running binary exits. Packs, volume, settings, and contribution records are preserved. A local npm installation prints a command to run in its project; Homebrew installations use `brew upgrade gitsama`.
+
+Git hooks, audio workers, help/version output, uninstallation, and noninteractive commands do not perform automatic update checks. Offline or failed checks leave your normal command working. Set `GITSAMA_NO_UPDATE_CHECK=1` to disable automatic checks; the explicit upgrade commands still work.
+
+**Already using 0.1.0?** Update once through your original installation method to get the new upgrade command. For npm:
+
+~~~sh
+npm install --global gitsama@latest
+~~~
+
+For a source installation, pull the updated source and rerun its installer; it rebuilds the current code when Cargo is available.
+
 ## Use Git normally
 
 After setup, do not change your Git workflow:
@@ -109,6 +144,7 @@ GitSama reacts automatically when the matching local Git event completes.
 | `gitsama use <id>` | Select a pack; restore a deleted built-in if needed. |
 | `gitsama test commit` | Preview one commit sound. |
 | `gitsama test all` | Preview every event in the active pack. |
+| `gitsama --upgrade` | Check for a new version and ask before installing it. |
 
 ### Pack commands
 
@@ -173,6 +209,8 @@ GitSama's hooks, playback, pack creation, validation, and previews run on your c
 - It has no account, server, database, telemetry, analytics, or background network service.
 - Hooks and previews keep repository activity and pack usage local.
 - It does not add files to a project repository.
+
+Interactive update checks request public release information from GitHub. Upgrading downloads release files or updates the npm package. These requests contain no repository activity, clip names, or pack usage. Automatic checks can be disabled with `GITSAMA_NO_UPDATE_CHECK=1`.
 
 The explicit `gitsama pack contribute` command uses your authenticated GitHub CLI to publish the selected pack's manifest, contribution README, and referenced audio through a pull request.
 
@@ -556,7 +594,7 @@ No Rust toolchain is required when installing a prebuilt release or using a pack
 
 ### Does GitSama watch GitHub?
 
-No. Git events and playback are handled locally. The explicit `pack contribute` command contacts GitHub to submit a pack PR.
+It does not watch Git repositories or GitHub activity. Git events and playback are handled locally. Interactive commands can check GitHub's public releases for updates, and the explicit `pack contribute` command contacts GitHub to submit a pack PR.
 
 ### Does it add files to my project?
 

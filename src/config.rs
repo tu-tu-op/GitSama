@@ -1,4 +1,4 @@
-use std::fs;
+use std::{collections::BTreeSet, fs};
 
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +47,8 @@ pub struct Config {
     pub enabled: bool,
     #[serde(default = "default_pack")]
     pub active_pack: String,
+    #[serde(default)]
+    pub removed_builtin_packs: BTreeSet<String>,
     #[serde(default = "default_volume")]
     pub volume: u8,
     #[serde(default = "default_threshold")]
@@ -71,6 +73,7 @@ impl Default for Config {
             schema_version: CONFIG_SCHEMA_VERSION,
             enabled: true,
             active_pack: default_pack(),
+            removed_builtin_packs: BTreeSet::new(),
             volume: default_volume(),
             massive_push_threshold: default_threshold(),
             queue_max_age_ms: default_queue_age(),
@@ -96,12 +99,23 @@ impl Config {
                 self.schema_version
             )));
         }
-        if self.active_pack.trim().is_empty() {
-            return Err(Error::Config("active_pack cannot be empty".to_owned()));
+        if self.active_pack.is_empty() && self.enabled {
+            return Err(Error::Config(
+                "select a voice pack before enabling playback: gitsama use <id>".to_owned(),
+            ));
         }
-        if !packs::is_valid_id(&self.active_pack) {
+        if !self.active_pack.is_empty() && !packs::is_valid_id(&self.active_pack) {
             return Err(Error::Config(
                 "active_pack must use a safe installed pack id".to_owned(),
+            ));
+        }
+        if self
+            .removed_builtin_packs
+            .iter()
+            .any(|id| !packs::is_built_in(id))
+        {
+            return Err(Error::Config(
+                "removed_builtin_packs must contain built-in pack IDs".to_owned(),
             ));
         }
         if self.volume > 100 {
@@ -133,6 +147,14 @@ impl Config {
 
     pub fn linger_cap_duration(&self) -> std::time::Duration {
         std::time::Duration::from_secs_f64(self.linger_cap_secs)
+    }
+
+    pub fn active_pack_label(&self) -> &str {
+        if self.active_pack.is_empty() {
+            "None"
+        } else {
+            &self.active_pack
+        }
     }
 
     pub fn load_or_default(paths: &AppPaths) -> Self {
@@ -296,6 +318,19 @@ mod tests {
         let mut config = Config::default();
         config.set_event_enabled(EventKind::Rebase, false);
         assert!(!config.is_event_enabled(EventKind::Rebase));
+    }
+
+    #[test]
+    fn removed_builtins_and_muted_empty_selection_are_valid() {
+        let config = Config::parse(
+            "enabled = false\nactive_pack = ''\nremoved_builtin_packs = ['naruto', 'starter']",
+        )
+        .expect("deleted all");
+        assert_eq!(config.active_pack_label(), "None");
+        assert_eq!(config.removed_builtin_packs.len(), 2);
+        assert!(Config::parse("active_pack = ''").is_err());
+        assert!(Config::parse("removed_builtin_packs = ['../outside']").is_err());
+        assert!(Config::parse("removed_builtin_packs = ['custom']").is_err());
     }
 
     #[test]

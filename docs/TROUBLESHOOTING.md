@@ -51,6 +51,14 @@ Run `gitsama pack scaffold [name]` in the folder containing WAV, MP3, OGG, or FL
 
 Use `gitsama pack scaffold --template <name> [parent]` for the manual template workflow. Run validation inside the generated pack folder where `pack.toml` exists. For automatic folder imports, the generated manifest is at the printed installed path.
 
+## Delete or restore a voice pack
+
+Run `gitsama pack delete <id>` using the lowercase ID shown by `gitsama pack list`. `pack remove <id>` is an alias for the same operation. Both can delete custom packs and built-in Naruto/Starter packs, including packs with broken manifests. They preserve the source soundtrack folder.
+
+Deleting the active pack selects another valid installed pack. If no packs remain, playback is muted and status shows `Active pack None`. Install clips with `gitsama pack scaffold` or select/restore a pack with `gitsama use <id>` before previewing or unmuting.
+
+Deleted built-ins are not automatically recreated by listing, setup, or doctor. Run `gitsama use naruto` or `gitsama use starter` to restore one explicitly.
+
 ## Voice-pack contributions
 
 The contribution invitation appears once after a locally scaffolded pack's first successful `gitsama test all`. Single-event tests, built-in packs, muted or zero-volume runs, queue timeouts, and playback errors do not trigger it. Partial packs qualify when at least one clip completes and all available event previews finish.

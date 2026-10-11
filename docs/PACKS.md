@@ -117,10 +117,16 @@ Validate before importing. Import copies the validated directory into the user's
 ```sh
 gitsama pack add ./my-custom-pack
 gitsama pack list
-gitsama pack remove my-custom-pack
+gitsama pack delete my-custom-pack
 ```
 
 The importer refuses to replace an existing pack. Remove the old pack explicitly before importing an updated copy.
+
+`pack delete <id>` and `pack remove <id>` delete any installed pack, including `naruto` and `starter`. The installed directory and local preview/contribution records are removed; the original source folder is preserved. Invalid IDs, paths outside the installed packs directory, and symlink pack roots are rejected. Broken packs can be deleted even if their manifest no longer validates.
+
+Deleting the active pack selects a remaining valid pack, preferring Naruto, then Starter, then a custom pack. Deleting the last pack clears the active selection and mutes playback. Afterward, selecting or scaffolding a pack resumes playback.
+
+Deleted built-ins stay absent during `pack list`, `setup`, and `doctor --fix`. To restore one, run `gitsama use naruto` or `gitsama use starter`; this reinstalls and selects that built-in pack.
 
 ## Preview and contribute
 

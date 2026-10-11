@@ -183,5 +183,6 @@ cargo run -- pack list               # List available sound packs
 cargo run -- pack scaffold [name]    # Install and select event-named audio from the current folder
 cargo run -- pack scaffold --template <name> [parent] # Create an empty pack template
 cargo run -- pack contribute <id>    # Submit a tested custom pack via authenticated GitHub CLI
+cargo run -- pack delete <id>        # Delete any installed pack; remove is also supported
 cargo run -- off-here / on-here      # Disable / re-enable GitSama in current repo
 ```

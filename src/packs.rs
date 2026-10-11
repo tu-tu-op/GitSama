@@ -8,6 +8,7 @@ use rand::random_range;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    config::Config,
     error::{Error, Result},
     events::EventKind,
     logging,
@@ -177,6 +178,12 @@ impl Pack {
 
 pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
     paths.ensure_layout()?;
+    if Config::load_or_default(paths)
+        .removed_builtin_packs
+        .contains(STARTER_ID)
+    {
+        return Ok(());
+    }
     let root = paths.packs.join(STARTER_ID);
     match fs::symlink_metadata(&root) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -267,8 +274,11 @@ pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
 
 pub fn ensure_bundled(paths: &AppPaths) -> Result<()> {
     paths.ensure_layout()?;
+    let removed = Config::load_or_default(paths).removed_builtin_packs;
     for pack in BUNDLED_PACKS {
-        ensure_bundled_pack(paths, pack)?;
+        if !removed.contains(pack.id) {
+            ensure_bundled_pack(paths, pack)?;
+        }
     }
     Ok(())
 }
@@ -348,6 +358,10 @@ fn ensure_directory(path: &Path, label: &str) -> Result<()> {
 pub fn installed(paths: &AppPaths) -> Result<Vec<Pack>> {
     ensure_starter(paths)?;
     ensure_bundled(paths)?;
+    installed_on_disk(paths)
+}
+
+fn installed_on_disk(paths: &AppPaths) -> Result<Vec<Pack>> {
     let entries = fs::read_dir(&paths.packs).map_err(|source| Error::ReadFile {
         path: paths.packs.clone(),
         source,
@@ -374,6 +388,19 @@ pub fn installed(paths: &AppPaths) -> Result<Vec<Pack>> {
     }
     packs.sort_by(|left, right| left.manifest.name.cmp(&right.manifest.name));
     Ok(packs)
+}
+
+pub fn fallback_id(paths: &AppPaths, excluded: &str) -> Result<String> {
+    Ok(installed_on_disk(paths)?
+        .into_iter()
+        .filter(|pack| pack.manifest.id != excluded)
+        .min_by_key(|pack| match pack.manifest.id.as_str() {
+            DEFAULT_PACK_ID => 0,
+            STARTER_ID => 1,
+            _ => 2,
+        })
+        .map(|pack| pack.manifest.id)
+        .unwrap_or_default())
 }
 
 pub fn summary(path: impl AsRef<Path>) -> Result<PackSummary> {
@@ -409,11 +436,6 @@ pub fn install(paths: &AppPaths, source: impl AsRef<Path>) -> Result<PackSummary
 
 pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {
     validate_id(id)?;
-    if is_built_in(id) {
-        return Err(Error::Pack(format!(
-            "the {id} pack is built in and cannot be removed"
-        )));
-    }
     let destination = paths.packs.join(id);
     let metadata = fs::symlink_metadata(&destination).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -425,15 +447,52 @@ pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {
             }
         }
     })?;
-    if !metadata.is_dir() || !destination.starts_with(&paths.packs) {
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(Error::Pack(
             "refusing to remove an unsafe pack path".to_owned(),
         ));
     }
-    fs::remove_dir_all(&destination).map_err(|source| Error::WriteFile {
+    let packs_root = fs::canonicalize(&paths.packs).map_err(|source| Error::ReadFile {
+        path: paths.packs.clone(),
+        source,
+    })?;
+    let destination = fs::canonicalize(&destination).map_err(|source| Error::ReadFile {
         path: destination,
         source,
     })?;
+    if destination.parent() != Some(packs_root.as_path()) {
+        return Err(Error::Pack(
+            "refusing to remove a pack outside the installed packs directory".to_owned(),
+        ));
+    }
+    let previous = Config::load_or_default(paths);
+    let mut config = previous.clone();
+    if is_built_in(id) {
+        config.removed_builtin_packs.insert(id.to_owned());
+    }
+    if config.active_pack == id {
+        config.active_pack = fallback_id(paths, id)?;
+        if config.active_pack.is_empty() {
+            config.enabled = false;
+        }
+    }
+    if config != previous {
+        config.save(paths)?;
+    }
+    if let Err(source) = fs::remove_dir_all(&destination) {
+        if config != previous {
+            previous.save(paths).map_err(|error| {
+                Error::message(format!(
+                    "could not remove {}: {source}; could not restore configuration: {error}",
+                    destination.display()
+                ))
+            })?;
+        }
+        return Err(Error::WriteFile {
+            path: destination,
+            source,
+        });
+    }
     crate::pack_state::remove(paths, id)
 }
 
@@ -1133,6 +1192,47 @@ mod tests {
         assert!(super::import_folder(&paths, &source, None).is_err());
         assert!(!paths.packs.join("clips").exists());
         assert_eq!(fs::read_dir(&paths.state).expect("state").count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deletion_rejects_a_pack_link_without_touching_its_target() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        let outside = directory.path().join("outside");
+        fs::create_dir(&outside).expect("outside");
+        fs::write(outside.join("private.txt"), "keep").expect("private");
+        symlink(&outside, paths.packs.join("linked")).expect("link");
+        assert!(super::remove(&paths, "linked").is_err());
+        assert_eq!(
+            fs::read_to_string(outside.join("private.txt")).expect("private"),
+            "keep"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_deletion_restores_selection_and_builtin_preferences() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        super::ensure_starter(&paths).expect("starter");
+        let config = crate::config::Config {
+            active_pack: "starter".to_owned(),
+            ..Default::default()
+        };
+        config.save(&paths).expect("config");
+        let clip = paths.packs.join("starter/audio/commit.wav");
+        let _locked = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&clip)
+            .expect("lock");
+        assert!(super::remove(&paths, "starter").is_err());
+        assert_eq!(crate::config::Config::load_or_default(&paths), config);
+        assert!(clip.exists());
     }
 
     #[test]

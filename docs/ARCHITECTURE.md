@@ -22,6 +22,8 @@ Configuration, packs, pending branch state, playback coordination, and logs live
 
 `pack_state.rs` stores per-pack creation, successful-preview fingerprints, invitation status, and contribution PR URLs in `state/pack-<id>.json`. Records are atomically replaced and removed with the pack. They are not part of a pack export.
 
+Pack deletion validates the canonical target within the installed packs directory, saves a replacement active selection, removes the directory, and clears its pack record. Deleted built-in IDs are remembered in configuration so normal materialization and repair leave them absent; explicit `use` restores them. An empty active ID is valid only with playback disabled, representing deletion of the last pack.
+
 ## Git 2.54 and configured hooks
 
 Setup checks the installed Git version before making changes. On a supported Git, it registers one named hook per native event with hook.gitsama-*.event, hook.gitsama-*.command, and hook.gitsama-*.enabled through git config. The command is an absolute, shell-quoted path to the installed executable.

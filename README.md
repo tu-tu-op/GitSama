@@ -112,6 +112,7 @@ gitsama pack scaffold --template <name> [parent]
 gitsama pack add <path>         Install a manually authored pack
 gitsama pack validate <path>    Validate a pack manifest and its files
 gitsama pack remove <id>        Remove a pack and its local records
+gitsama pack delete <id>        Delete any pack (alias for remove)
 gitsama pack contribute <id>    Submit a tested pack as a GitHub PR
 gitsama use <id>                Select a pack
 gitsama test [event|all]        Play one event or every event
@@ -214,6 +215,19 @@ gitsama test all
 ~~~
 
 The template parent is optional. `pack add` remains available for downloaded or manually authored packs.
+
+### Delete a voice pack
+
+Use its lowercase ID:
+
+~~~sh
+gitsama pack delete bleach
+gitsama pack delete naruto
+~~~
+
+`pack remove <id>` is also supported. Deletion removes the installed copy and its local preview/contribution records. Your original soundtrack folder remains intact. If the active pack is deleted, GitSama selects another installed pack; deleting the last pack clears the selection and mutes playback.
+
+Built-in Naruto and Starter packs can be deleted too. GitSama remembers their deletion during listing, setup, and repair. Restore either explicitly with `gitsama use naruto` or `gitsama use starter`. Selecting or scaffolding a pack after deleting the last one resumes playback.
 
 A pack has this general layout:
 

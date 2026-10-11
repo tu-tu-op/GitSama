@@ -98,6 +98,10 @@ pub enum PackCommand {
     Add {
         path: String,
     },
+    #[command(
+        visible_alias = "delete",
+        about = "Delete any installed pack, including built-ins"
+    )]
     Remove {
         id: String,
     },
@@ -189,7 +193,7 @@ fn dashboard() -> Result<()> {
     println!("Anime reactions for your Git workflow.");
     println!();
     println!("Status       {state}");
-    println!("Active Pack  {}", config.active_pack);
+    println!("Active Pack  {}", config.active_pack_label());
     println!("Volume       {}%", config.volume);
     println!("Big Push     {} commits", config.massive_push_threshold);
     println!("Playback     {}", config.playback_mode);
@@ -233,14 +237,17 @@ fn setup() -> Result<()> {
     packs::ensure_bundled(&paths)?;
     let mut config = Config::load_or_default(&paths);
     if packs::find(&paths, &config.active_pack).is_err() {
-        config.active_pack = packs::DEFAULT_PACK_ID.to_owned();
+        config.active_pack = packs::fallback_id(&paths, "")?;
+        if config.active_pack.is_empty() {
+            config.enabled = false;
+        }
     }
 
     println!("GitSama setup");
     println!();
     println!("✓ Git {}", version.short());
     println!("✓ Git 2.54 named hook system");
-    println!("✓ Built-in packs ready");
+    println!("✓ Pack library ready");
     if audio::test_mode() {
         println!("✓ Audio test mode enabled");
     } else {
@@ -286,7 +293,7 @@ fn setup() -> Result<()> {
 
     println!("✓ GitSama hooks registered");
     println!();
-    println!("Active pack: {}", config.active_pack);
+    println!("Active pack: {}", config.active_pack_label());
     println!("Volume: {}%", config.volume);
     println!("Massive push threshold: {}", config.massive_push_threshold);
 
@@ -339,7 +346,7 @@ fn status() -> Result<()> {
     println!("GitSama status");
     println!();
     println!("State        {state}");
-    println!("Active pack  {}", config.active_pack);
+    println!("Active pack  {}", config.active_pack_label());
     println!("Volume       {}%", config.volume);
     println!("Big Push     {} commits", config.massive_push_threshold);
     println!("Playback     {}", config.playback_mode);
@@ -402,7 +409,7 @@ fn settings() -> Result<()> {
 }
 
 fn print_config(config: &Config) {
-    println!("Active Pack          {}", config.active_pack);
+    println!("Active Pack          {}", config.active_pack_label());
     println!("Volume               {}%", config.volume);
     println!(
         "Massive Push         {} commits",
@@ -469,8 +476,19 @@ fn pack_command(command: PackCommand) -> Result<()> {
             Ok(())
         }
         PackCommand::Remove { id } => {
+            let was_active = Config::load_or_default(&paths).active_pack == id;
             packs::remove(&paths, &id)?;
             println!("Removed pack {id}");
+            if was_active {
+                let config = Config::load_or_default(&paths);
+                if config.active_pack.is_empty() {
+                    println!(
+                        "No voice packs remain; playback muted. Install a pack with gitsama pack scaffold, or restore a built-in with gitsama use naruto."
+                    );
+                } else {
+                    println!("✓ Using {}", config.active_pack);
+                }
+            }
             Ok(())
         }
         PackCommand::Validate { path } => {
@@ -560,6 +578,9 @@ fn pack_command(command: PackCommand) -> Result<()> {
                 }
             }
             let mut config = Config::load_or_default(&paths);
+            if config.active_pack.is_empty() {
+                config.enabled = true;
+            }
             config.active_pack = summary.id.clone();
             config.save(&paths).map_err(|error| Error::message(format!(
                 "pack was installed but could not be selected: {error}; retry with gitsama use {}", summary.id
@@ -589,10 +610,16 @@ fn contribution_value(flag: &str, value: Option<String>, prompt: &str) -> Result
 
 fn use_pack(id: &str) -> Result<()> {
     let paths = AppPaths::discover()?;
+    let mut config = Config::load_or_default(&paths);
+    if config.removed_builtin_packs.remove(id) {
+        config.save(&paths)?;
+    }
     packs::ensure_starter(&paths)?;
     packs::ensure_bundled(&paths)?;
     let pack = packs::find(&paths, id)?;
-    let mut config = Config::load_or_default(&paths);
+    if config.active_pack.is_empty() {
+        config.enabled = true;
+    }
     config.active_pack = pack.manifest.id.clone();
     config.save(&paths)?;
     println!("✓ Using {} ({})", pack.manifest.name, pack.manifest.id);
@@ -605,6 +632,9 @@ fn test_command(value: Option<&str>) -> Result<()> {
     packs::ensure_starter(&paths)?;
     packs::ensure_bundled(&paths)?;
     let config = Config::load_or_default(&paths);
+    if config.active_pack.is_empty() {
+        return Err(Error::Pack("no voice pack selected; install one with gitsama pack scaffold or select/restore one with gitsama use <id>".to_owned()));
+    }
     let value = match value {
         Some(value) => value.to_owned(),
         None if interactive() => {
@@ -986,5 +1016,15 @@ mod tests {
             .is_ok()
         );
         assert!(Cli::try_parse_from(["gitsama", "pack", "contribute"]).is_err());
+    }
+
+    #[test]
+    fn delete_and_remove_accept_the_same_pack_id() {
+        for command in ["delete", "remove"] {
+            let cli = Cli::try_parse_from(["gitsama", "pack", command, "naruto"]).expect("parse");
+            assert!(matches!(cli.command, Some(Command::Pack {
+                command: super::PackCommand::Remove { id }
+            }) if id == "naruto"));
+        }
     }
 }

@@ -897,6 +897,87 @@ fn contribution_invitation_requires_a_full_preview_and_appears_once_per_installa
 }
 
 #[test]
+fn delete_any_pack_preserves_sources_and_remembers_builtin_deletions() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    let source = sandbox._directory.path().join("Delete Pack");
+    fs::create_dir(&source).expect("source");
+    fs::copy(
+        sandbox.home.join("packs/starter/audio/commit.wav"),
+        source.join("commit.wav"),
+    )
+    .expect("source clip");
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold"]);
+    sandbox.tool_ok(None, &["test", "all"]);
+    let deleted = sandbox.tool_ok(None, &["pack", "delete", "delete-pack"]);
+    assert!(String::from_utf8_lossy(&deleted.stdout).contains("Using naruto"));
+    assert!(!sandbox.home.join("packs/delete-pack").exists());
+    assert!(!sandbox.home.join("state/pack-delete-pack.json").exists());
+    assert!(source.join("commit.wav").exists());
+    sandbox.tool_ok(None, &["pack", "remove", "starter"]);
+    assert!(!sandbox.home.join("packs/starter").exists());
+    let last = sandbox.tool_ok(None, &["pack", "delete", "naruto"]);
+    assert!(
+        String::from_utf8_lossy(&last.stdout).contains("No voice packs remain; playback muted")
+    );
+    let config = || -> toml::Value {
+        toml::from_str(&fs::read_to_string(sandbox.home.join("config.toml")).expect("config"))
+            .expect("toml")
+    };
+    assert_eq!(config()["active_pack"].as_str(), Some(""));
+    assert_eq!(config()["enabled"].as_bool(), Some(false));
+    assert_eq!(
+        config()["removed_builtin_packs"]
+            .as_array()
+            .expect("removed")
+            .len(),
+        2
+    );
+    let list = sandbox.tool_ok(None, &["pack", "list"]);
+    assert!(String::from_utf8_lossy(&list.stdout).trim().is_empty());
+    let preview = sandbox.tool(None, &["test", "all"]);
+    assert!(!preview.status.success());
+    assert!(String::from_utf8_lossy(&preview.stderr).contains("no voice pack selected"));
+    let status = sandbox.tool_ok(None, &["status"]);
+    assert!(String::from_utf8_lossy(&status.stdout).contains("Active pack  None"));
+    sandbox.tool_ok(None, &["doctor", "--fix"]);
+    sandbox.tool_ok(None, &["setup"]);
+    assert!(!sandbox.home.join("packs/naruto").exists());
+    assert!(!sandbox.home.join("packs/starter").exists());
+    sandbox.tool_ok(None, &["use", "naruto"]);
+    assert!(sandbox.home.join("packs/naruto/pack.toml").exists());
+    assert!(!sandbox.home.join("packs/starter").exists());
+    assert_eq!(config()["active_pack"].as_str(), Some("naruto"));
+    assert_eq!(config()["enabled"].as_bool(), Some(true));
+    sandbox.tool_ok(None, &["test", "commit"]);
+    sandbox.tool_ok(None, &["pack", "delete", "naruto"]);
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold", "Fresh Pack"]);
+    assert_eq!(config()["active_pack"].as_str(), Some("fresh-pack"));
+    assert_eq!(config()["enabled"].as_bool(), Some(true));
+    sandbox.tool_ok(None, &["test", "all"]);
+    sandbox.tool_ok(None, &["pack", "delete", "fresh-pack"]);
+    sandbox.tool_ok(None, &["use", "starter"]);
+    assert!(sandbox.home.join("packs/starter/pack.toml").exists());
+    assert!(!sandbox.home.join("packs/naruto").exists());
+}
+
+#[test]
+fn delete_rejects_unsafe_or_missing_ids_and_can_remove_a_broken_pack() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    for id in ["../naruto", "naruto/..", "Naruto", "missing-pack"] {
+        let output = sandbox.tool(None, &["pack", "delete", id]);
+        assert!(!output.status.success(), "{id}");
+        assert!(sandbox.home.join("packs/naruto/pack.toml").exists());
+    }
+    let broken = sandbox.home.join("packs/broken");
+    fs::create_dir(&broken).expect("broken pack");
+    fs::write(broken.join("pack.toml"), "invalid TOML").expect("manifest");
+    sandbox.tool_ok(None, &["pack", "delete", "broken"]);
+    assert!(!broken.exists());
+}
+
+#[test]
 fn malformed_runtime_state_cannot_fail_a_hook() {
     let sandbox = Sandbox::new();
     fs::create_dir_all(&sandbox.home).expect("home");

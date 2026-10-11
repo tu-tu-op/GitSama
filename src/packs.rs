@@ -442,11 +442,208 @@ pub fn find(paths: &AppPaths, id: &str) -> Result<Pack> {
     Pack::load(path)
 }
 
+/// Build an installed pack from event-named clips without writing to the source.
+pub fn import_folder(
+    paths: &AppPaths,
+    source: impl AsRef<Path>,
+    name: Option<&str>,
+) -> Result<PackSummary> {
+    let source = source.as_ref();
+    let metadata = fs::symlink_metadata(source).map_err(|source_error| Error::ReadFile {
+        path: source.to_path_buf(),
+        source: source_error,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(Error::Pack(
+            "clip folder must be a directory, not a symlink".to_owned(),
+        ));
+    }
+    let source = fs::canonicalize(source).map_err(|source_error| Error::ReadFile {
+        path: source.to_path_buf(),
+        source: source_error,
+    })?;
+    let name = name
+        .or_else(|| source.file_name().and_then(|value| value.to_str()))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            Error::Pack("provide a nonempty pack name: gitsama pack scaffold <name>".to_owned())
+        })?
+        .trim();
+    let id = slugify(name);
+    validate_id(&id)?;
+    if is_built_in(&id) {
+        return Err(Error::Pack(format!(
+            "'{id}' is a built-in pack id; scaffold with a different name"
+        )));
+    }
+    let destination = paths.packs.join(&id);
+    reject_existing(&destination)?;
+
+    let mut clips = BTreeMap::new();
+    let mut unmatched = Vec::new();
+    let mut directories = vec![source.clone()];
+    let audio = source.join("audio");
+    match fs::symlink_metadata(&audio) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(Error::Pack(
+                "audio/ must be a directory, not a symlink".to_owned(),
+            ));
+        }
+        Ok(_) => directories.push(audio),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source_error) => {
+            return Err(Error::ReadFile {
+                path: audio,
+                source: source_error,
+            });
+        }
+    }
+    for directory in directories {
+        for entry in fs::read_dir(&directory).map_err(|source| Error::ReadFile {
+            path: directory.clone(),
+            source,
+        })? {
+            let entry = entry.map_err(|source| Error::ReadFile {
+                path: directory.clone(),
+                source,
+            })?;
+            let path = entry.path();
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !SUPPORTED_EXTENSIONS.contains(&extension.as_str()) {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path).map_err(|source| Error::ReadFile {
+                path: path.clone(),
+                source,
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(Error::Pack(format!(
+                    "audio must be a regular file, not a symlink: {}",
+                    path.display()
+                )));
+            }
+            let filename = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| Error::Pack("audio filenames must be UTF-8".to_owned()))?;
+            let Some(event) = event_from_filename(&path) else {
+                unmatched.push(filename);
+                continue;
+            };
+            let key = filename.to_ascii_lowercase();
+            if clips.insert(key, (event, filename.clone(), path)).is_some() {
+                return Err(Error::Pack(format!(
+                    "audio filename collision: {filename}; rename one of the clips"
+                )));
+            }
+        }
+    }
+    if !unmatched.is_empty() {
+        unmatched.sort();
+        return Err(Error::Pack(format!(
+            "unmatched audio filenames: {}. Rename clips to commit, push, massive-push, merge, branch-switch, branch-create, branch-delete, or rebase (optionally numbered, e.g. commit-1.mp3)",
+            unmatched.join(", ")
+        )));
+    }
+    if clips.is_empty() {
+        return Err(Error::Pack("no event audio found; add WAV, MP3, OGG, or FLAC clips, or use scaffold --template <name> for an empty template".to_owned()));
+    }
+
+    paths.ensure_layout()?;
+    let staging = tempfile::Builder::new()
+        .prefix("pack-import-")
+        .tempdir_in(&paths.state)
+        .map_err(|source| Error::WriteFile {
+            path: paths.state.clone(),
+            source,
+        })?;
+    let root = staging.path().join("pack");
+    fs::create_dir_all(root.join("audio")).map_err(|source| Error::WriteFile {
+        path: root.clone(),
+        source,
+    })?;
+    let mut events: BTreeMap<String, Vec<String>> = EventKind::ALL
+        .into_iter()
+        .map(|event| (event.as_str().to_owned(), Vec::new()))
+        .collect();
+    for (event, filename, path) in clips.values() {
+        let relative = format!("audio/{filename}");
+        let target = root.join(&relative);
+        fs::copy(path, &target).map_err(|source| Error::WriteFile {
+            path: target,
+            source,
+        })?;
+        events
+            .get_mut(event.as_str())
+            .expect("known event")
+            .push(relative);
+    }
+    let manifest = PackManifest {
+        schema_version: PACK_SCHEMA_VERSION,
+        id,
+        name: name.to_owned(),
+        author: "Your Name".to_owned(),
+        version: "1.0.0".to_owned(),
+        description: "A GitSama sound pack.".to_owned(),
+        license: "user-provided".to_owned(),
+        events,
+    };
+    write_manifest(&root, &manifest)?;
+    let readme = format!(
+        "# {name}\n\nEvent mappings were generated from clip filenames.\n\nPreview the installed pack:\n\n    gitsama use {}\n    gitsama test all\n\nOnly contribute audio you have permission to redistribute.\n",
+        manifest.id
+    );
+    fs::write(root.join("README.md"), readme).map_err(|source| Error::WriteFile {
+        path: root.join("README.md"),
+        source,
+    })?;
+    Pack::load(&root)?;
+    reject_existing(&destination)?;
+    fs::rename(&root, &destination).map_err(|source| Error::WriteFile {
+        path: destination.clone(),
+        source,
+    })?;
+    summary(destination)
+}
+
+fn reject_existing(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Err(Error::Pack(format!(
+            "destination {} already exists; use a different name or explicitly remove the installed pack first",
+            path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(Error::ReadFile {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn event_from_filename(path: &Path) -> Option<EventKind> {
+    let stem = path.file_stem()?.to_str()?;
+    EventKind::parse(stem).ok().or_else(|| {
+        let (event, number) = stem.rsplit_once(['-', '_'])?;
+        if !number.bytes().all(|value| value.is_ascii_digit()) {
+            return None;
+        }
+        if number.parse::<u32>().ok()? == 0 {
+            return None;
+        }
+        EventKind::parse(event).ok()
+    })
+}
+
 pub fn scaffold(name: &str, parent: impl AsRef<Path>) -> Result<PathBuf> {
     if name.trim().is_empty() {
         return Err(Error::Pack("pack name cannot be empty".to_owned()));
     }
     let id = slugify(name);
+    validate_id(&id)?;
     let parent = parent.as_ref();
     let root = parent.join(&id);
     if fs::symlink_metadata(&root).is_ok() {
@@ -791,6 +988,117 @@ mod tests {
     fn scaffold_rejects_an_empty_name() {
         let directory = tempfile::tempdir().expect("temp");
         assert!(super::scaffold(" ", directory.path()).is_err());
+    }
+
+    #[test]
+    fn imports_named_clips_without_changing_the_source() {
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("Bleach Bankai");
+        fs::create_dir_all(source.join("audio")).expect("source");
+        fs::write(source.join("Commit-1.WAV"), b"first clip").expect("clip");
+        fs::write(source.join("audio/commit_2.mp3"), b"second clip").expect("clip");
+        fs::write(source.join("branch_switch.ogg"), b"branch clip").expect("clip");
+        fs::write(source.join("push.flac"), b"push clip").expect("clip");
+        fs::write(source.join("private.txt"), b"not pack data").expect("extra");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        let installed = super::import_folder(&paths, &source, None).expect("import");
+        assert_eq!(installed.name, "Bleach Bankai");
+        assert_eq!(installed.id, "bleach-bankai");
+        let pack = super::find(&paths, &installed.id).expect("installed");
+        assert_eq!(pack.files_for(EventKind::Commit).len(), 2);
+        assert_eq!(pack.files_for(EventKind::BranchSwitch).len(), 1);
+        assert!(pack.files_for(EventKind::Merge).is_empty());
+        assert_eq!(
+            pack.resolve(EventKind::MassivePush).expect("fallback").0,
+            EventKind::Push
+        );
+        assert_eq!(
+            fs::read(pack.root.join("audio/Commit-1.WAV")).expect("copied bytes"),
+            b"first clip"
+        );
+        assert!(!pack.root.join("private.txt").exists());
+        assert!(!source.join("pack.toml").exists());
+        assert!(source.join("Commit-1.WAV").exists());
+        assert_eq!(fs::read_dir(&paths.state).expect("state").count(), 0);
+        assert!(super::import_folder(&paths, &source, None).is_err());
+        let renamed = super::import_folder(&paths, &source, Some("Other Pack")).expect("rename");
+        assert_eq!(renamed.id, "other-pack");
+        assert_eq!(renamed.name, "Other Pack");
+    }
+
+    #[test]
+    fn rejects_empty_unmatched_reserved_and_conflicting_imports() {
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("clips");
+        fs::create_dir_all(source.join("audio")).expect("source");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        assert!(super::import_folder(&paths, &source, None).is_err());
+        fs::write(source.join("bankai.mp3"), b"clip").expect("clip");
+        fs::write(source.join("commit.wav"), b"clip").expect("clip");
+        let error = super::import_folder(&paths, &source, None).expect_err("unmatched");
+        assert!(error.to_string().contains("bankai.mp3"));
+        assert!(!paths.root.exists());
+        fs::remove_file(source.join("bankai.mp3")).expect("remove");
+        assert!(super::import_folder(&paths, &source, Some("naruto")).is_err());
+        assert!(super::import_folder(&paths, &source, Some(" ")).is_err());
+        fs::write(source.join("audio/COMMIT.WAV"), b"collision").expect("clip");
+        let error = super::import_folder(&paths, &source, None).expect_err("collision");
+        assert!(error.to_string().contains("collision"));
+        assert!(!paths.root.exists());
+    }
+
+    #[test]
+    fn only_numbered_event_filenames_are_recognized() {
+        for filename in [
+            "commit-0.wav",
+            "commit-+1.wav",
+            "commit-final.mp3",
+            "branch-1.wav",
+        ] {
+            assert!(
+                super::event_from_filename(std::path::Path::new(filename)).is_none(),
+                "{filename}"
+            );
+        }
+        assert_eq!(
+            super::event_from_filename(std::path::Path::new("Branch-Create_12.FLAC")),
+            Some(EventKind::BranchCreate)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_import_rejects_linked_audio() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("clips");
+        fs::create_dir(&source).expect("source");
+        let outside = directory.path().join("outside.wav");
+        fs::write(&outside, b"private audio").expect("outside");
+        symlink(&outside, source.join("commit.wav")).expect("link");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        assert!(super::import_folder(&paths, &source, None).is_err());
+        assert!(!paths.root.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_copy_cleans_up_staging() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("clips");
+        fs::create_dir(&source).expect("source");
+        let clip = source.join("commit.wav");
+        fs::write(&clip, b"clip").expect("clip");
+        let _locked = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&clip)
+            .expect("lock clip");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        assert!(super::import_folder(&paths, &source, None).is_err());
+        assert!(!paths.packs.join("clips").exists());
+        assert_eq!(fs::read_dir(&paths.state).expect("state").count(), 0);
     }
 
     #[test]

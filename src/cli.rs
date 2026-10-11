@@ -11,7 +11,7 @@ use crate::{
     config::Config,
     error::{Error, Result},
     events::EventKind,
-    git, hooks, packs,
+    git, hooks, pack_state, packs,
     paths::AppPaths,
     platform,
 };
@@ -147,7 +147,7 @@ pub fn run() -> Result<()> {
             let paths = AppPaths::discover()?;
             let config = Config::load_or_default(&paths);
             match audio::play(&paths, &config, EventKind::parse(&event)?) {
-                Ok(()) => Ok(()),
+                Ok(_) => Ok(()),
                 Err(error) => {
                     audio::log_playback_error(&paths, &error);
                     Ok(())
@@ -482,6 +482,14 @@ fn pack_command(command: PackCommand) -> Result<()> {
                 return Ok(());
             }
             let summary = packs::import_folder(&paths, current, name.as_deref())?;
+            pack_state::save(
+                &paths,
+                &summary.id,
+                &pack_state::PackState {
+                    created_locally: true,
+                    ..Default::default()
+                },
+            )?;
             println!("✓ Installed {} ({})", summary.name, summary.id);
             println!("Pack path: {}", paths.packs.join(&summary.id).display());
             let pack = packs::find(&paths, &summary.id)?;
@@ -549,8 +557,42 @@ fn test_command(value: Option<&str>) -> Result<()> {
     };
 
     if value.eq_ignore_ascii_case("all") {
+        let custom = !packs::is_built_in(&config.active_pack);
+        let mut state = pack_state::load(&paths, &config.active_pack)?;
+        let original = if custom {
+            Some(pack_state::fingerprint(&packs::find(
+                &paths,
+                &config.active_pack,
+            )?)?)
+        } else {
+            None
+        };
+        if custom {
+            state.tested_fingerprint = None;
+            pack_state::save(&paths, &config.active_pack, &state)?;
+        }
+        let mut played = false;
+        let mut complete = true;
         for event in EventKind::ALL {
-            test_one(&paths, &config, event)?;
+            match test_one(&paths, &config, event)? {
+                audio::PlaybackOutcome::Played { .. } => played = true,
+                audio::PlaybackOutcome::Skipped(audio::SkipReason::NoSound) => {}
+                audio::PlaybackOutcome::Skipped(_) => complete = false,
+            }
+        }
+        if custom && played && complete {
+            let pack = packs::find(&paths, &config.active_pack)?;
+            state.tested_fingerprint = Some(pack_state::fingerprint(&pack)?);
+            if state.tested_fingerprint != original {
+                return Err(Error::Pack(
+                    "pack changed during playback; rerun gitsama test all".to_owned(),
+                ));
+            }
+            pack_state::save(&paths, &config.active_pack, &state)?;
+            println!(
+                "✓ Full preview completed for {} ({})",
+                pack.manifest.name, pack.manifest.id
+            );
         }
         return Ok(());
     }
@@ -559,16 +601,32 @@ fn test_command(value: Option<&str>) -> Result<()> {
         Ok(index) if (1..=EventKind::ALL.len()).contains(&index) => EventKind::ALL[index - 1],
         _ => EventKind::parse(&value)?,
     };
-    test_one(&paths, &config, event)
+    test_one(&paths, &config, event).map(|_| ())
 }
 
-fn test_one(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
-    println!("  Playing {}", event.label());
-    if audio::test_mode() {
-        audio::dispatch(paths, config, event, audio::DispatchDetails::default())
-    } else {
-        audio::play(paths, config, event)
+fn test_one(paths: &AppPaths, config: &Config, event: EventKind) -> Result<audio::PlaybackOutcome> {
+    let outcome = audio::play(paths, config, event)?;
+    match &outcome {
+        audio::PlaybackOutcome::Played {
+            resolved_event,
+            path,
+        } => {
+            let filename = path.file_name().unwrap_or_default().to_string_lossy();
+            if *resolved_event != event {
+                println!(
+                    "  Played {}: {filename} (fallback to {})",
+                    event.label(),
+                    resolved_event.label()
+                );
+            } else {
+                println!("  Played {}: {filename}", event.label());
+            }
+        }
+        audio::PlaybackOutcome::Skipped(reason) => {
+            println!("  Skipped {}: {}", event.label(), reason.message())
+        }
     }
+    Ok(outcome)
 }
 
 fn set_volume(value: u8) -> Result<()> {

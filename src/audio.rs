@@ -281,7 +281,35 @@ pub fn play_linger(
     Ok(())
 }
 
-pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
+#[derive(Debug)]
+pub enum PlaybackOutcome {
+    Played {
+        resolved_event: EventKind,
+        path: PathBuf,
+    },
+    Skipped(SkipReason),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SkipReason {
+    Muted,
+    ZeroVolume,
+    NoSound,
+    QueueTimeout,
+}
+
+impl SkipReason {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Muted => "GitSama is muted",
+            Self::ZeroVolume => "volume is zero",
+            Self::NoSound => "no sound mapped",
+            Self::QueueTimeout => "playback queue timed out",
+        }
+    }
+}
+
+pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<PlaybackOutcome> {
     let pid = std::process::id();
     let job_info = platform::current_job_info();
     logging::write(
@@ -289,44 +317,55 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
         &format!("pid={pid} worker started: {event} [{job_info}]"),
     );
 
-    if test_mode() {
-        let record = TestRecord {
-            event,
-            branch: None,
-            commit_count: None,
-        };
-        logging::write(
-            paths,
-            &format!("pid={pid} test mode playback record written for {event}"),
-        );
-        return write_test_record(&record);
-    }
     if !config.enabled {
         logging::write(
             paths,
             &format!("pid={pid} playback skipped: muted/disabled"),
         );
-        return Ok(());
+        return Ok(PlaybackOutcome::Skipped(SkipReason::Muted));
+    }
+    if config.volume == 0 {
+        logging::write(
+            paths,
+            &format!("pid={pid} playback skipped: volume is zero"),
+        );
+        return Ok(PlaybackOutcome::Skipped(SkipReason::ZeroVolume));
     }
     let pack = packs::find(paths, &config.active_pack)?;
-    let Some((_, path)) = pack.resolve(event) else {
+    let Some((resolved_event, path)) = pack.resolve(event) else {
         logging::write(
             paths,
             &format!("pid={pid} playback skipped: no sound file in pack"),
         );
-        return Ok(());
+        return Ok(PlaybackOutcome::Skipped(SkipReason::NoSound));
     };
+    let file = File::open(&path)
+        .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
+    let decoder = Decoder::try_from(file)
+        .map_err(|error| Error::Audio(format!("{}: {error}", path.display())))?;
+    if test_mode() {
+        let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
+            return Ok(PlaybackOutcome::Skipped(SkipReason::QueueTimeout));
+        };
+        write_test_record(&TestRecord {
+            event: resolved_event,
+            branch: None,
+            commit_count: None,
+        })?;
+        return Ok(PlaybackOutcome::Played {
+            resolved_event,
+            path,
+        });
+    }
     // Pre-initialize audio output stream and decode audio before acquiring the lock.
     // This eliminates device spin-up latency while holding the lock and minimizes time-to-first-sound.
-    let stream = OutputStreamBuilder::open_default_stream()
+    let mut stream = OutputStreamBuilder::open_default_stream()
         .map_err(|error| Error::Audio(error.to_string()))?;
+    stream.log_on_drop(false);
     logging::write(paths, &format!("pid={pid} audio device opened for {event}"));
 
     let sink = Sink::connect_new(stream.mixer());
     sink.pause();
-    let file = File::open(&path)
-        .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
-    let decoder = Decoder::try_from(file).map_err(|error| Error::Audio(error.to_string()))?;
     sink.set_volume(f32::from(config.volume) / 100.0);
     sink.append(decoder);
 
@@ -335,7 +374,7 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
             paths,
             &format!("pid={pid} lock acquire timed out for {event}"),
         );
-        return Ok(());
+        return Ok(PlaybackOutcome::Skipped(SkipReason::QueueTimeout));
     };
     logging::write(paths, &format!("pid={pid} lock acquired for {event}"));
 
@@ -343,7 +382,10 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<()> {
     logging::write(paths, &format!("pid={pid} first sound started for {event}"));
     sink.sleep_until_end();
     logging::write(paths, &format!("pid={pid} playback finished for {event}"));
-    Ok(())
+    Ok(PlaybackOutcome::Played {
+        resolved_event,
+        path,
+    })
 }
 
 fn resolve_enabled(

@@ -764,6 +764,78 @@ fn scaffold_installs_and_selects_clips_from_the_current_folder() {
 }
 
 #[test]
+fn full_preview_records_only_completed_playback_and_removal_clears_state() {
+    let sandbox = Sandbox::new();
+    sandbox.tool_ok(None, &["test", "commit"]);
+    let source = sandbox._directory.path().join("Preview Pack");
+    fs::create_dir(&source).expect("source");
+    fs::copy(
+        sandbox.home.join("packs/starter/audio/commit.wav"),
+        source.join("commit.wav"),
+    )
+    .expect("tone");
+    sandbox.tool_ok(Some(&source), &["pack", "scaffold"]);
+    let state_path = sandbox.home.join("state/pack-preview-pack.json");
+    let state = || -> Value {
+        serde_json::from_slice(&fs::read(&state_path).expect("state")).expect("json")
+    };
+    assert!(state()["created_locally"].as_bool().expect("created"));
+    assert!(state()["tested_fingerprint"].is_null());
+    sandbox.tool_ok(None, &["test", "commit"]);
+    assert!(state()["tested_fingerprint"].is_null());
+    let preview = sandbox.tool(None, &["test", "all"]);
+    assert!(preview.status.success());
+    let text = String::from_utf8_lossy(&preview.stdout);
+    assert!(text.contains("Played Commit: commit.wav"));
+    assert!(text.contains("Skipped Push: no sound mapped"));
+    assert!(text.contains("Full preview completed"));
+    assert!(state()["tested_fingerprint"].is_string());
+    sandbox.tool_ok(None, &["mute"]);
+    let muted = sandbox.tool(None, &["test", "all"]);
+    assert!(String::from_utf8_lossy(&muted.stdout).contains("GitSama is muted"));
+    assert!(state()["tested_fingerprint"].is_null());
+    sandbox.tool_ok(None, &["unmute"]);
+    sandbox.tool_ok(None, &["volume", "0"]);
+    let silent = sandbox.tool(None, &["test", "all"]);
+    assert!(String::from_utf8_lossy(&silent.stdout).contains("volume is zero"));
+    assert!(state()["tested_fingerprint"].is_null());
+    sandbox.tool_ok(None, &["volume", "80"]);
+    let config_path = sandbox.home.join("config.toml");
+    let config = fs::read_to_string(&config_path).expect("config");
+    fs::write(
+        &config_path,
+        config.replace("queue_max_age_ms = 5000", "queue_max_age_ms = 1"),
+    )
+    .expect("queue cap");
+    let lock = sandbox.home.join("state/playback.lock");
+    fs::create_dir(&lock).expect("lock");
+    fs::write(lock.join("owner_pid"), std::process::id().to_string()).expect("owner");
+    let heartbeat = fs::File::create(lock.join("heartbeat")).expect("heartbeat");
+    heartbeat
+        .set_times(
+            fs::FileTimes::new()
+                .set_modified(std::time::SystemTime::now() + Duration::from_secs(60)),
+        )
+        .expect("fresh heartbeat");
+    drop(heartbeat);
+    let busy = sandbox.tool(None, &["test", "all"]);
+    assert!(String::from_utf8_lossy(&busy.stdout).contains("playback queue timed out"));
+    assert!(state()["tested_fingerprint"].is_null());
+    fs::remove_dir_all(lock).expect("unlock");
+    fs::write(&config_path, config).expect("restore config");
+    let installed_clip = sandbox.home.join("packs/preview-pack/audio/commit.wav");
+    fs::write(&installed_clip, b"corrupt audio").expect("corrupt clip");
+    let broken = sandbox.tool(None, &["test", "all"]);
+    assert!(!broken.status.success());
+    assert!(state()["tested_fingerprint"].is_null());
+    fs::copy(source.join("commit.wav"), installed_clip).expect("repair clip");
+    sandbox.tool_ok(None, &["test", "all"]);
+    assert!(state()["tested_fingerprint"].is_string());
+    sandbox.tool_ok(None, &["pack", "remove", "preview-pack"]);
+    assert!(!state_path.exists());
+}
+
+#[test]
 fn malformed_runtime_state_cannot_fail_a_hook() {
     let sandbox = Sandbox::new();
     fs::create_dir_all(&sandbox.home).expect("home");

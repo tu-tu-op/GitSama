@@ -433,7 +433,8 @@ pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {
     fs::remove_dir_all(&destination).map_err(|source| Error::WriteFile {
         path: destination,
         source,
-    })
+    })?;
+    crate::pack_state::remove(paths, id)
 }
 
 pub fn find(paths: &AppPaths, id: &str) -> Result<Pack> {

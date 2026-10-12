@@ -15,7 +15,7 @@
   "keywords": ["git", "cli", "audio", "developer-tools"],
   "preferGlobal": true,
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "bin": {
     "gitsama": "bin/gitsama.js"

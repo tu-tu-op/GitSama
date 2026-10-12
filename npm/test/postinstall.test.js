@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { version: npmVersion } = require('../package.json');
-const { parseSha256, releaseAsset, verifySha256 } = require('../scripts/postinstall');
+const { fetchBuffer, parseSha256, releaseAsset, verifySha256 } = require('../scripts/postinstall');
 
 test('npm and Rust package versions match', () => {
   const cargoToml = fs.readFileSync(path.join(__dirname, '..', '..', 'Cargo.toml'), 'utf8');
@@ -39,6 +39,25 @@ test('accepts standard sha256sum output and rejects malformed checksums', () => 
   const digest = 'a'.repeat(64);
   assert.equal(parseSha256(`${digest}  gitsama`), digest);
   assert.throws(() => parseSha256('not-a-checksum'), /invalid/);
+  assert.equal(parseSha256(`${digest} *expected`, 'expected'), digest);
+  assert.throws(() => parseSha256(`${digest}  other`, 'expected'), /unexpected/);
+  assert.throws(() => parseSha256(`${digest}  expected\nextra`), /invalid/);
+});
+
+test('bounds streamed downloads even when the server omits or lies about length', async () => {
+  const original = global.fetch;
+  try {
+    for (const length of [null, '1']) {
+      global.fetch = async () => ({
+        ok: true, url: 'https://example.invalid/asset', headers: new Headers(length === null ? {} : { 'content-length': length }),
+        body: new ReadableStream({ start(controller) { controller.enqueue(Buffer.alloc(5)); controller.enqueue(Buffer.alloc(5)); controller.close(); } }),
+      });
+      await assert.rejects(fetchBuffer('https://example.invalid/asset', 8), /size limit/);
+    }
+    global.fetch = async () => ({ ok: true, url: 'http://example.invalid/asset' });
+    await assert.rejects(fetchBuffer('https://example.invalid/asset'), /HTTPS/);
+    await assert.rejects(fetchBuffer('http://example.invalid/asset'), /HTTPS/);
+  } finally { global.fetch = original; }
 });
 
 test('verifies the downloaded native binary before installing it', () => {

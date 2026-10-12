@@ -430,49 +430,32 @@ pub fn process_exists(pid: u32) -> bool {
 }
 
 pub fn schedule_cleanup(executable: &Path, data_root: Option<&Path>) -> Result<()> {
-    #[cfg(windows)]
-    {
-        let executable = windows_cmd_quote(executable);
-        let cleanup = data_root.map(windows_cmd_quote);
-        let mut command_text =
-            String::from("cd /d \"%TEMP%\" >nul 2>nul & timeout /t 1 /nobreak >nul");
-        command_text.push_str(" & del /f /q ");
-        command_text.push_str(&executable);
-        if let Some(root) = cleanup {
-            command_text.push_str(" & rmdir /s /q ");
-            command_text.push_str(&root);
-        }
-        Command::new("cmd.exe")
-            .args(["/C", &command_text])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| Error::message(format!("could not schedule Windows cleanup: {error}")))
+    let current = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| Error::message(format!("could not locate the running binary: {error}")))?;
+    let executable = executable
+        .canonicalize()
+        .map_err(|source| Error::ReadFile {
+            path: executable.to_path_buf(),
+            source,
+        })?;
+    if current != executable {
+        return Err(Error::message(
+            "cleanup can only remove the running GitSama executable",
+        ));
     }
-    #[cfg(not(windows))]
-    {
-        let script = if data_root.is_some() {
-            "sleep 1; rm -f -- \"$1\"; rm -rf -- \"$2\""
-        } else {
-            "sleep 1; rm -f -- \"$1\""
-        };
-        let mut command = Command::new("sh");
-        command
-            .args(["-c", script, "gitsama-cleanup"])
-            .arg(executable)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Some(root) = data_root {
-            command.arg(root);
-        }
-        command
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| Error::message(format!("could not schedule cleanup: {error}")))
+    if let Some(root) = data_root {
+        let root = crate::paths::AppPaths::from_root(root.to_path_buf()).validate_removal()?;
+        self_replace::self_delete_outside_path(&root).map_err(|error| {
+            Error::message(format!("could not remove the installed binary: {error}"))
+        })?;
+        std::fs::remove_dir_all(&root).map_err(|source| Error::WriteFile { path: root, source })?;
+    } else {
+        self_replace::self_delete().map_err(|error| {
+            Error::message(format!("could not remove the installed binary: {error}"))
+        })?;
     }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -544,11 +527,6 @@ fn normalize_windows_path(path: &Path) -> String {
         .replace('/', "\\")
         .trim_end_matches('\\')
         .to_ascii_lowercase()
-}
-
-#[cfg(windows)]
-fn windows_cmd_quote(path: &Path) -> String {
-    format!("\"{}\"", path.to_string_lossy().replace('"', "\\\""))
 }
 
 #[cfg(not(windows))]

@@ -143,30 +143,35 @@ impl AppPaths {
                 "refusing to use a filesystem root as GitSama home",
             ));
         }
-        for protected in [dirs::home_dir(), env::current_dir().ok()]
-            .into_iter()
-            .flatten()
-        {
-            if let Ok(protected) = fs::canonicalize(protected) {
-                if protected.starts_with(&root) {
+        if let Some(home) = dirs::home_dir() {
+            if let Ok(home) = fs::canonicalize(home) {
+                if home.starts_with(&root) {
                     return Err(Error::message(
-                        "GitSama home cannot contain your home or working directory; select a dedicated data directory",
+                        "GitSama home cannot contain your user home; select a dedicated data directory",
                     ));
                 }
             }
         }
-        Ok(root)
-    }
-
-    pub fn validate_removal(&self) -> Result<PathBuf> {
-        let root = self.validate_root_location()?;
         if fs::symlink_metadata(root.join(".git")).is_ok()
             || (root.join("HEAD").is_file()
                 && root.join("objects").is_dir()
                 && root.join("refs").is_dir())
         {
             return Err(Error::message(
-                "refusing to recursively remove a Git repository as GitSama home",
+                "refusing to use a Git repository as GitSama home",
+            ));
+        }
+        Ok(root)
+    }
+
+    pub fn validate_removal(&self) -> Result<PathBuf> {
+        let root = self.validate_root_location()?;
+        if env::current_dir()
+            .and_then(fs::canonicalize)
+            .is_ok_and(|working| working.starts_with(&root))
+        {
+            return Err(Error::message(
+                "refusing to remove your working directory; run uninstall outside the GitSama data directory or use --keep-data",
             ));
         }
         let marker = root.join(HOME_MARKER);

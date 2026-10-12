@@ -1373,3 +1373,20 @@ fn dead_process_lock_is_reclaimed_by_hook() {
     let events = sandbox.wait_for_events(1);
     assert_eq!(events, vec!["commit"]);
 }
+#[test]
+fn installed_pack_directory_remains_usable_but_cannot_be_deleted_under_the_caller() {
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let pack_directory = sandbox.home.join("packs").join("starter");
+    sandbox.tool_ok(Some(&pack_directory), &["pack", "validate", "."]);
+    sandbox.tool_ok(Some(&pack_directory), &["test", "commit"]);
+    let output = sandbox.tool(Some(&pack_directory), &["uninstall", "--yes"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("working directory"));
+    assert!(pack_directory.is_dir());
+    sandbox.tool_ok(
+        Some(&pack_directory),
+        &["uninstall", "--yes", "--keep-data"],
+    );
+    assert!(pack_directory.is_dir());
+}

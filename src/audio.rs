@@ -492,7 +492,16 @@ impl PlaybackLock {
                 },
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     if lock_is_stale(&path, max_age) {
-                        let _ = fs::remove_dir_all(&path);
+                        match fs::remove_dir_all(&path) {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(source) => {
+                                return Err(Error::WriteFile {
+                                    path: path.clone(),
+                                    source,
+                                });
+                            }
+                        }
                         continue;
                     }
                     if start.elapsed() >= max_age {
@@ -655,6 +664,29 @@ mod tests {
             "Lock took too long to reclaim"
         );
         drop(lock);
+    }
+
+    #[test]
+    fn an_unremovable_stale_lock_cannot_spin_forever() {
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        let file = fs::File::create(paths.state.join("playback.lock")).expect("broken lock");
+        file.set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .expect("stale timestamp");
+        drop(file);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender
+                .send(PlaybackLock::acquire(&paths, 1000).is_err())
+                .expect("result")
+        });
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("lock acquisition must terminate")
+        );
+        worker.join().expect("worker");
     }
 
     #[test]

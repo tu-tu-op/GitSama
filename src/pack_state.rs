@@ -2,7 +2,6 @@ use std::{
     collections::{BTreeSet, hash_map::DefaultHasher},
     fs,
     hash::{Hash, Hasher},
-    io::Write,
 };
 
 use serde::{Deserialize, Serialize};
@@ -43,24 +42,9 @@ pub fn load(paths: &AppPaths, id: &str) -> Result<PackState> {
 pub fn save(paths: &AppPaths, id: &str, state: &PackState) -> Result<()> {
     let path = state_path(paths, id)?;
     paths.ensure_layout()?;
-    let mut staging =
-        tempfile::NamedTempFile::new_in(&paths.state).map_err(|source| Error::WriteFile {
-            path: path.clone(),
-            source,
-        })?;
     let bytes =
         serde_json::to_vec_pretty(state).map_err(|error| Error::message(error.to_string()))?;
-    staging
-        .write_all(&bytes)
-        .map_err(|source| Error::WriteFile {
-            path: path.clone(),
-            source,
-        })?;
-    staging.persist(&path).map_err(|error| Error::WriteFile {
-        path,
-        source: error.error,
-    })?;
-    Ok(())
+    crate::paths::write_atomic(&path, &bytes)
 }
 
 pub fn remove(paths: &AppPaths, id: &str) -> Result<()> {

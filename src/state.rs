@@ -27,7 +27,7 @@ pub fn write_pending(paths: &AppPaths, pending: &PendingBranch) -> Result<()> {
     let path = pending_path(paths, &pending.repository, &pending.branch);
     let text = serde_json::to_string(pending)
         .map_err(|error| Error::message(format!("could not serialize branch state: {error}")))?;
-    fs::write(&path, text).map_err(|source| Error::WriteFile { path, source })
+    crate::paths::write_atomic(&path, text.as_bytes())
 }
 
 pub fn take_pending(
@@ -68,7 +68,7 @@ pub fn mark_recent(paths: &AppPaths, repository: &str, branch: &str, age_ms: u64
     };
     let text = serde_json::to_string(&recent)
         .map_err(|error| Error::message(format!("could not serialize branch marker: {error}")))?;
-    fs::write(&path, text).map_err(|source| Error::WriteFile { path, source })
+    crate::paths::write_atomic(&path, text.as_bytes())
 }
 
 pub fn take_recent(paths: &AppPaths, repository: &str, branch: &str) -> Result<bool> {

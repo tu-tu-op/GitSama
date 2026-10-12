@@ -1,10 +1,35 @@
-use std::{env, fs, io::Write, path::PathBuf};
+use std::{
+    env, fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use crate::error::{Error, Result};
 
 pub const APP_DIR_NAME: &str = ".gitsama";
 const HOME_MARKER: &str = ".gitsama-home";
 const HOME_MARKER_CONTENT: &[u8] = b"gitsama-home-v1\n";
+
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::message("invalid state file path"))?;
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|source| Error::WriteFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    file.write_all(bytes)
+        .and_then(|_| file.as_file().sync_all())
+        .map_err(|source| Error::WriteFile {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    file.persist(path).map_err(|error| Error::WriteFile {
+        path: path.to_path_buf(),
+        source: error.error,
+    })?;
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct AppPaths {
@@ -199,6 +224,45 @@ impl AppPaths {
 #[cfg(test)]
 mod tests {
     use super::AppPaths;
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_state_writes_replace_links_without_touching_external_files() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join("data"));
+        paths.ensure_layout().expect("layout");
+        let outside = directory.path().join("private.txt");
+        std::fs::write(&outside, "must survive").expect("outside");
+        symlink(&outside, &paths.config).expect("link");
+        super::write_atomic(&paths.config, b"volume = 80\n").expect("save");
+        assert_eq!(
+            std::fs::read_to_string(outside).expect("outside"),
+            "must survive"
+        );
+        assert!(
+            !std::fs::symlink_metadata(&paths.config)
+                .expect("config")
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            std::fs::metadata(&paths.config)
+                .expect("config")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(&paths.root)
+                .expect("root")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+    }
     #[test]
     fn cleanup_requires_an_owned_directory_and_protects_home_and_repositories() {
         let directory = tempfile::tempdir().expect("temp");

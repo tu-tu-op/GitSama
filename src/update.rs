@@ -116,13 +116,9 @@ fn save_record(path: &Path, record: &CheckRecord) -> Result<()> {
         path: parent.to_path_buf(),
         source,
     })?;
-    let mut file = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|error| Error::message(format!("could not stage update record: {error}")))?;
-    serde_json::to_writer(&mut file, record)
+    let bytes = serde_json::to_vec(record)
         .map_err(|error| Error::message(format!("could not save update record: {error}")))?;
-    file.persist(path)
-        .map_err(|error| Error::message(format!("could not save update record: {error}")))?;
-    Ok(())
+    crate::paths::write_atomic(path, &bytes)
 }
 
 /// Only called after ordinary interactive commands; failures never change their result.

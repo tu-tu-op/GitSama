@@ -32,44 +32,130 @@ struct BundledPack {
     audio: &'static [BundledAudio],
 }
 
-const BUNDLED_PACKS: &[BundledPack] = &[BundledPack {
-    id: DEFAULT_PACK_ID,
-    manifest: include_str!("../packs/naruto/pack.toml"),
-    audio: &[
-        BundledAudio {
-            relative_path: "audio/commit.mp3",
-            bytes: include_bytes!("../packs/naruto/audio/commit.mp3"),
-        },
-        BundledAudio {
-            relative_path: "audio/push.mp3",
-            bytes: include_bytes!("../packs/naruto/audio/push.mp3"),
-        },
-        BundledAudio {
-            relative_path: "audio/massive-push.mp3",
-            bytes: include_bytes!("../packs/naruto/audio/massive-push.mp3"),
-        },
-        BundledAudio {
-            relative_path: "audio/merge.mp3",
-            bytes: include_bytes!("../packs/naruto/audio/merge.mp3"),
-        },
-        BundledAudio {
-            relative_path: "audio/branch-switch.mp3",
-            bytes: include_bytes!("../packs/naruto/audio/branch-switch.mp3"),
-        },
-        BundledAudio {
-            relative_path: "audio/branch-create.mp3",
-            bytes: include_bytes!("../packs/naruto/audio/branch-create.mp3"),
-        },
-        BundledAudio {
-            relative_path: "audio/branch-delete.mp3",
-            bytes: include_bytes!("../packs/naruto/audio/branch-delete.mp3"),
-        },
-        BundledAudio {
-            relative_path: "audio/rebase.mp3",
-            bytes: include_bytes!("../packs/naruto/audio/rebase.mp3"),
-        },
-    ],
-}];
+const BUNDLED_PACKS: &[BundledPack] = &[
+    BundledPack {
+        id: DEFAULT_PACK_ID,
+        manifest: include_str!("../packs/naruto/pack.toml"),
+        audio: &[
+            BundledAudio {
+                relative_path: "audio/commit.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/commit.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/push.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/push.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/massive-push.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/massive-push.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/merge.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/merge.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/branch-switch.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/branch-switch.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/branch-create.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/branch-create.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/branch-delete.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/branch-delete.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/rebase.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/rebase.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/pull.mp3",
+                bytes: include_bytes!("../packs/naruto/audio/pull.mp3"),
+            },
+        ],
+    },
+    BundledPack {
+        id: "bleach",
+        manifest: include_str!("../packs/bleach/pack.toml"),
+        audio: &[
+            BundledAudio {
+                relative_path: "audio/branch-create.mp3",
+                bytes: include_bytes!("../packs/bleach/audio/branch-create.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/branch-delete.mp3",
+                bytes: include_bytes!("../packs/bleach/audio/branch-delete.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/branch-switch.mp3",
+                bytes: include_bytes!("../packs/bleach/audio/branch-switch.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/Commit.mp3",
+                bytes: include_bytes!("../packs/bleach/audio/Commit.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/massive-push.mp3",
+                bytes: include_bytes!("../packs/bleach/audio/massive-push.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/merge.mp3",
+                bytes: include_bytes!("../packs/bleach/audio/merge.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/push.mp3",
+                bytes: include_bytes!("../packs/bleach/audio/push.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/rebase.mp3",
+                bytes: include_bytes!("../packs/bleach/audio/rebase.mp3"),
+            },
+        ],
+    },
+    BundledPack {
+        id: "ravi-kishan",
+        manifest: include_str!("../packs/ravi-kishan/pack.toml"),
+        audio: &[
+            BundledAudio {
+                relative_path: "audio/branch-create.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/branch-create.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/branch-delete.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/branch-delete.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/branch-switch.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/branch-switch.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/commit.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/commit.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/massive-push.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/massive-push.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/merge.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/merge.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/pull.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/pull.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/push.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/push.mp3"),
+            },
+            BundledAudio {
+                relative_path: "audio/rebase.mp3",
+                bytes: include_bytes!("../packs/ravi-kishan/audio/rebase.mp3"),
+            },
+        ],
+    },
+];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -158,12 +244,13 @@ impl Pack {
 
     pub fn resolve(&self, event: EventKind) -> Option<(EventKind, PathBuf)> {
         let mut candidates = self.files_for(event);
-        let resolved_event = if candidates.is_empty() && event == EventKind::MassivePush {
-            candidates = self.files_for(EventKind::Push);
-            EventKind::Push
-        } else {
-            event
-        };
+        let mut resolved_event = event;
+        if candidates.is_empty() {
+            if let Some(fallback) = event.fallback() {
+                candidates = self.files_for(fallback);
+                resolved_event = fallback;
+            }
+        }
 
         if candidates.is_empty() {
             return None;
@@ -257,6 +344,7 @@ pub fn ensure_starter(paths: &AppPaths) -> Result<()> {
         write_tone(&path, frequency, duration)?;
         events.insert(event.as_str().to_owned(), vec![format!("audio/{filename}")]);
     }
+    events.insert("pull".to_owned(), vec!["audio/merge.wav".to_owned()]);
 
     let manifest = PackManifest {
         schema_version: PACK_SCHEMA_VERSION,
@@ -605,7 +693,7 @@ pub fn import_folder(
     if !unmatched.is_empty() {
         unmatched.sort();
         return Err(Error::Pack(format!(
-            "unmatched audio filenames: {}. Rename clips to commit, push, massive-push, merge, branch-switch, branch-create, branch-delete, or rebase (optionally numbered, e.g. commit-1.mp3)",
+            "unmatched audio filenames: {}. Rename clips to commit, push, massive-push, merge, branch-switch, branch-create, branch-delete, rebase, or pull (optionally numbered, e.g. commit-1.mp3)",
             unmatched.join(", ")
         )));
     }
@@ -1089,6 +1177,7 @@ mod tests {
         fs::write(source.join("audio/commit_2.mp3"), b"second clip").expect("clip");
         fs::write(source.join("branch_switch.ogg"), b"branch clip").expect("clip");
         fs::write(source.join("push.flac"), b"push clip").expect("clip");
+        fs::write(source.join("audio/pull-2.wav"), b"pull clip").expect("clip");
         fs::write(source.join("private.txt"), b"not pack data").expect("extra");
         let paths = AppPaths::from_root(directory.path().join("home"));
         let installed = super::import_folder(&paths, &source, None).expect("import");
@@ -1097,6 +1186,7 @@ mod tests {
         let pack = super::find(&paths, &installed.id).expect("installed");
         assert_eq!(pack.files_for(EventKind::Commit).len(), 2);
         assert_eq!(pack.files_for(EventKind::BranchSwitch).len(), 1);
+        assert_eq!(pack.files_for(EventKind::Pull).len(), 1);
         assert!(pack.files_for(EventKind::Merge).is_empty());
         assert_eq!(
             pack.resolve(EventKind::MassivePush).expect("fallback").0,
@@ -1130,7 +1220,15 @@ mod tests {
         assert!(!paths.root.exists());
         fs::remove_file(source.join("bankai.mp3")).expect("remove");
         assert!(super::import_folder(&paths, &source, Some("naruto")).is_err());
-        for reserved in ["Starter", "CON", "NUL", "com1", "LPT9"] {
+        for reserved in [
+            "Bleach",
+            "Ravi Kishan",
+            "Starter",
+            "CON",
+            "NUL",
+            "com1",
+            "LPT9",
+        ] {
             assert!(super::import_folder(&paths, &source, Some(reserved)).is_err());
         }
         assert!(super::import_folder(&paths, &source, Some(" ")).is_err());
@@ -1236,7 +1334,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_multiple_files_and_massive_push_fallback() {
+    fn resolves_multiple_files_and_event_fallbacks() {
         let directory = tempfile::tempdir().expect("temp");
         let mut events = BTreeMap::new();
         events.insert(
@@ -1253,6 +1351,19 @@ mod tests {
         assert_eq!(resolved, EventKind::Push);
         assert!(path.ends_with("push-1.wav") || path.ends_with("push-2.wav"));
         assert!(pack.resolve(EventKind::Merge).is_none());
+        assert!(pack.resolve(EventKind::Pull).is_none());
+        pack.manifest
+            .events
+            .insert("merge".to_owned(), vec!["audio/merge.wav".to_owned()]);
+        let (resolved, path) = pack.resolve(EventKind::Pull).expect("pull fallback");
+        assert_eq!(resolved, EventKind::Merge);
+        assert!(path.ends_with("merge.wav"));
+        pack.manifest
+            .events
+            .insert("pull".to_owned(), vec!["audio/pull.wav".to_owned()]);
+        let (resolved, path) = pack.resolve(EventKind::Pull).expect("pull clip");
+        assert_eq!(resolved, EventKind::Pull);
+        assert!(path.ends_with("pull.wav"));
     }
 
     #[test]
@@ -1266,7 +1377,7 @@ mod tests {
     }
 
     #[test]
-    fn installs_and_repairs_the_bundled_default_pack() {
+    fn installs_and_repairs_all_bundled_voice_packs() {
         let directory = tempfile::tempdir().expect("temp");
         let paths = AppPaths::from_root(directory.path().join(".gitsama"));
 
@@ -1274,10 +1385,22 @@ mod tests {
         let pack = super::find(&paths, DEFAULT_PACK_ID).expect("default pack");
         assert_eq!(pack.manifest.name, "Naruto Voice Pack");
         assert_eq!(pack.files_for(EventKind::Commit).len(), 1);
+        assert!(pack.files_for(EventKind::Pull)[0].ends_with("pull.mp3"));
 
-        fs::remove_file(paths.packs.join("naruto/audio/commit.mp3")).expect("remove audio");
-        super::ensure_bundled(&paths).expect("repair bundled pack");
-        assert!(super::find(&paths, DEFAULT_PACK_ID).is_ok());
+        assert_eq!(super::BUNDLED_PACKS.len(), 3);
+        for bundled in super::BUNDLED_PACKS {
+            assert!(super::is_built_in(bundled.id));
+            let pack = super::find(&paths, bundled.id).expect("bundled pack");
+            for asset in bundled.audio {
+                assert_eq!(
+                    fs::read(pack.root.join(asset.relative_path)).unwrap(),
+                    asset.bytes
+                );
+            }
+            fs::remove_file(pack.root.join(bundled.audio[0].relative_path)).expect("remove audio");
+            super::ensure_bundled(&paths).expect("repair bundled pack");
+            assert!(super::find(&paths, bundled.id).is_ok());
+        }
     }
 
     #[cfg(unix)]

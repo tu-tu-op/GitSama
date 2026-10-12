@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $repository = "tu-tu-op/GitSama"
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $manifestPath = Join-Path $scriptDirectory "Cargo.toml"
-$version = "0.1.1"
+$version = "0.1.2"
 if (Test-Path $manifestPath) {
     $versionLine = Select-String -Path $manifestPath -Pattern '^version = "([^"]+)"' | Select-Object -First 1
     if ($versionLine) {

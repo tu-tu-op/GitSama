@@ -2,6 +2,12 @@
 
 All notable GitSama changes are recorded here.
 
+## 0.1.2
+
+- Preinstall Naruto, Bleach, and Ravi Kishan voice packs, preserving their clip mappings and supporting deletion and explicit restoration. Naruto remains the initial selection and includes its dedicated Pull soundtrack.
+- Add a Pull sound that plays once when a pull changes the current branch, with independent controls and Merge clip fallback for older packs. Up-to-date pulls stay silent; standalone merge and rebase behavior is preserved.
+- Make the README easier to browse with collapsible guides, quick navigation, and a Pull usage reference while preserving the existing documentation.
+
 ## 0.1.1
 
 - Import folders of event-named WAV, MP3, OGG, or FLAC clips with `pack scaffold`; install and select the resulting pack automatically.

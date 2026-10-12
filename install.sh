@@ -9,7 +9,7 @@ if [ -z "$USER_HOME" ]; then
 fi
 INSTALL_ROOT="$USER_HOME/.gitsama"
 BIN_DIR="$INSTALL_ROOT/bin"
-VERSION="${GITSAMA_VERSION:-0.1.1}"
+VERSION="${GITSAMA_VERSION:-0.1.2}"
 SCRIPT_DIR=""
 if [ -f "$0" ]; then
   SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

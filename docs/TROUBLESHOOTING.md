@@ -65,20 +65,20 @@ Run `gitsama pack scaffold [name]` in the folder containing WAV, MP3, OGG, or FL
 
 - **Unmatched filename**: rename supported audio to an event name, such as `commit.mp3` or `branch-switch-1.wav`.
 - **Filename collision**: root and `audio/` clips are copied into one installed audio directory. Give duplicate basenames distinct numbered names; comparisons ignore case.
-- **Reserved ID**: choose a different name than `starter`, `naruto`, or a Windows device name such as `con`.
+- **Reserved ID**: choose a different name than `starter`, `naruto`, `bleach`, `ravi-kishan`, or a Windows device name such as `con`.
 - **Already installed**: use another name or explicitly remove the old pack with `gitsama pack remove <id>` before scaffolding again.
 - **Unsafe path**: provide ordinary directories and regular audio files; remove symlinks and traversal paths.
-- **Wrong command or name**: use `gitsama pack add`, and select the lowercase ID with `gitsama use bleach`.
+- **Wrong command or name**: use `gitsama pack add`, and select the lowercase ID with `gitsama use bleach-custom`.
 
 Use `gitsama pack scaffold --template <name> [parent]` for the manual template workflow. Run validation inside the generated pack folder where `pack.toml` exists. For automatic folder imports, the generated manifest is at the printed installed path.
 
 ## Delete or restore a voice pack
 
-Run `gitsama pack delete <id>` using the lowercase ID shown by `gitsama pack list`. `pack remove <id>` is an alias for the same operation. Both can delete custom packs and built-in Naruto/Starter packs, including packs with broken manifests. They preserve the source soundtrack folder.
+Run `gitsama pack delete <id>` using the lowercase ID shown by `gitsama pack list`. `pack remove <id>` is an alias for the same operation. Both can delete custom packs and built-in Naruto, Bleach, Ravi Kishan, and Starter packs, including packs with broken manifests. They preserve the source soundtrack folder.
 
 Deleting the active pack selects another valid installed pack. If no packs remain, playback is muted and status shows `Active pack None`. Install clips with `gitsama pack scaffold` or select/restore a pack with `gitsama use <id>` before previewing or unmuting.
 
-Deleted built-ins are not automatically recreated by listing, setup, or doctor. Run `gitsama use naruto` or `gitsama use starter` to restore one explicitly.
+Deleted built-ins are not automatically recreated by listing, setup, or doctor. Run `gitsama use <id>` with `naruto`, `bleach`, `ravi-kishan`, or `starter` to restore one explicitly.
 
 ## Voice-pack contributions
 

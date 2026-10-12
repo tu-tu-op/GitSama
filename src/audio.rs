@@ -52,17 +52,23 @@ pub fn dispatch(
     let Some((resolved_event, _)) = resolve_enabled(config, &pack, requested) else {
         return Ok(());
     };
+    // Pull keeps its own event and controls even when borrowing a Merge clip.
+    let event = if requested == EventKind::Pull {
+        requested
+    } else {
+        resolved_event
+    };
 
     if test_mode() && env::var("GITSAMA_DISPATCH_FULL_TIER").is_err() {
         let record = TestRecord {
-            event: resolved_event,
+            event,
             branch: details.branch,
             commit_count: details.commit_count,
         };
         return write_test_record(&record);
     }
 
-    dispatch_with_fallback(paths, config, resolved_event)
+    dispatch_with_fallback(paths, config, event)
 }
 
 fn get_cached_tier(paths: &AppPaths) -> Option<String> {

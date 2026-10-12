@@ -213,6 +213,8 @@ pub struct EventSettings {
     pub branch_delete: bool,
     #[serde(default = "default_true")]
     pub rebase: bool,
+    #[serde(default = "default_true")]
+    pub pull: bool,
 }
 
 impl Default for EventSettings {
@@ -226,6 +228,7 @@ impl Default for EventSettings {
             branch_create: true,
             branch_delete: true,
             rebase: true,
+            pull: true,
         }
     }
 }
@@ -241,6 +244,7 @@ impl EventSettings {
             EventKind::BranchCreate => self.branch_create,
             EventKind::BranchDelete => self.branch_delete,
             EventKind::Rebase => self.rebase,
+            EventKind::Pull => self.pull,
         }
     }
 
@@ -254,6 +258,7 @@ impl EventSettings {
             EventKind::BranchCreate => self.branch_create = enabled,
             EventKind::BranchDelete => self.branch_delete = enabled,
             EventKind::Rebase => self.rebase = enabled,
+            EventKind::Pull => self.pull = enabled,
         }
     }
 }
@@ -283,6 +288,7 @@ mod tests {
         assert_eq!(config.massive_push_threshold, 7);
         assert!(!config.is_event_enabled(EventKind::Commit));
         assert!(config.is_event_enabled(EventKind::Push));
+        assert!(config.is_event_enabled(EventKind::Pull));
     }
 
     #[test]
@@ -318,16 +324,18 @@ mod tests {
         let mut config = Config::default();
         config.set_event_enabled(EventKind::Rebase, false);
         assert!(!config.is_event_enabled(EventKind::Rebase));
+        config.set_event_enabled(EventKind::Pull, false);
+        assert!(!config.is_event_enabled(EventKind::Pull));
     }
 
     #[test]
     fn removed_builtins_and_muted_empty_selection_are_valid() {
         let config = Config::parse(
-            "enabled = false\nactive_pack = ''\nremoved_builtin_packs = ['naruto', 'starter']",
+            "enabled = false\nactive_pack = ''\nremoved_builtin_packs = ['naruto', 'bleach', 'ravi-kishan', 'starter']",
         )
         .expect("deleted all");
         assert_eq!(config.active_pack_label(), "None");
-        assert_eq!(config.removed_builtin_packs.len(), 2);
+        assert_eq!(config.removed_builtin_packs.len(), 4);
         assert!(Config::parse("active_pack = ''").is_err());
         assert!(Config::parse("removed_builtin_packs = ['../outside']").is_err());
         assert!(Config::parse("removed_builtin_packs = ['custom']").is_err());

@@ -15,10 +15,11 @@ pub enum EventKind {
     BranchCreate,
     BranchDelete,
     Rebase,
+    Pull,
 }
 
 impl EventKind {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Commit,
         Self::Push,
         Self::MassivePush,
@@ -27,6 +28,7 @@ impl EventKind {
         Self::BranchCreate,
         Self::BranchDelete,
         Self::Rebase,
+        Self::Pull,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -39,6 +41,7 @@ impl EventKind {
             Self::BranchCreate => "branch_create",
             Self::BranchDelete => "branch_delete",
             Self::Rebase => "rebase",
+            Self::Pull => "pull",
         }
     }
 
@@ -52,6 +55,15 @@ impl EventKind {
             Self::BranchCreate => "Branch Create",
             Self::BranchDelete => "Branch Delete",
             Self::Rebase => "Rebase",
+            Self::Pull => "Pull",
+        }
+    }
+
+    pub const fn fallback(self) -> Option<Self> {
+        match self {
+            Self::MassivePush => Some(Self::Push),
+            Self::Pull => Some(Self::Merge),
+            _ => None,
         }
     }
 
@@ -81,6 +93,7 @@ impl FromStr for EventKind {
             "branch_create" => Ok(Self::BranchCreate),
             "branch_delete" => Ok(Self::BranchDelete),
             "rebase" => Ok(Self::Rebase),
+            "pull" => Ok(Self::Pull),
             _ => Err(()),
         }
     }

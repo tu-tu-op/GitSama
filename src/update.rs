@@ -35,6 +35,8 @@ struct Release {
     tag_name: String,
     draft: bool,
     prerelease: bool,
+    #[serde(default)]
+    immutable: bool,
     assets: Vec<Asset>,
 }
 
@@ -43,9 +45,19 @@ struct Asset {
     name: String,
     browser_download_url: String,
     size: u64,
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 impl Release {
+    fn require_immutable(&self) -> Result<()> {
+        if !self.immutable {
+            return Err(Error::message(
+                "standalone updates require an immutable official GitHub release; use npm or build from reviewed source until the maintainer publishes one",
+            ));
+        }
+        Ok(())
+    }
     fn version(&self) -> Result<Version> {
         let version = self.tag_name.strip_prefix('v').unwrap_or(&self.tag_name);
         let version = Version::parse(version)
@@ -225,6 +237,13 @@ fn download(asset: &Asset, limit: u64) -> Result<Vec<u8>> {
     if bytes.len() as u64 != asset.size {
         return Err(Error::message("the release download is incomplete"));
     }
+    if let Some(digest) = &asset.digest {
+        if !digest.eq_ignore_ascii_case(&format!("sha256:{:x}", Sha256::digest(&bytes))) {
+            return Err(Error::message(
+                "the download does not match GitHub's recorded asset digest",
+            ));
+        }
+    }
     Ok(bytes)
 }
 
@@ -266,6 +285,7 @@ fn install(release: &Release, automatic: bool) -> Result<()> {
             "this binary is managed by npm; run npm install --global gitsama@latest",
         ));
     }
+    release.require_immutable()?;
     let name = asset_name(&version)?;
     let binary_asset = release.asset(&name)?;
     let checksum_asset = release.asset(&format!("{name}.sha256"))?;
@@ -320,6 +340,30 @@ fn install(release: &Release, automatic: bool) -> Result<()> {
     println!("Updated GitSama to {version}. Your packs and settings are preserved.");
     println!("The next gitsama command will use the new version.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Release;
+
+    #[test]
+    fn standalone_updates_require_explicit_release_immutability() {
+        for immutable in [
+            serde_json::Value::Null,
+            serde_json::json!(false),
+            serde_json::json!(true),
+        ] {
+            let mut json = serde_json::json!({"tag_name":"v0.1.3", "draft":false, "prerelease":false, "assets":[]});
+            if !immutable.is_null() {
+                json["immutable"] = immutable.clone();
+            }
+            let release: Release = serde_json::from_value(json).expect("release");
+            assert_eq!(
+                release.require_immutable().is_ok(),
+                immutable == serde_json::json!(true)
+            );
+        }
+    }
 }
 
 fn verify_binary(path: &Path, version: &Version) -> Result<()> {

@@ -5,6 +5,7 @@ const { createHash } = require('node:crypto');
 const { lstat, mkdir, mkdtemp, realpath, rename, rm, writeFile } = require('node:fs/promises');
 const path = require('node:path');
 const { version } = require('../package.json');
+const { loadChecksums } = require('./release-checksums');
 
 const repository = 'tu-tu-op/GitSama';
 const maxBinaryBytes = 100 * 1024 * 1024;
@@ -57,12 +58,11 @@ async function fetchBuffer(url, limit = maxBinaryBytes) {
 
 async function install() {
   const target = releaseAsset();
+  const checksums = loadChecksums();
   const base = `https://github.com/${repository}/releases/download/v${version}/`;
-  const [binary, checksumFile] = await Promise.all([
-    fetchBuffer(base + target.asset),
-    fetchBuffer(base + `${target.asset}.sha256`, 1024),
-  ]);
-  verifySha256(binary, checksumFile.toString('utf8'), target.asset);
+  const binary = await fetchBuffer(base + target.asset);
+  // The expected digest ships inside npm's immutable, integrity-checked tarball.
+  verifySha256(binary, checksums.assets[target.asset]);
 
   const nativeDirectory = path.join(__dirname, '..', 'native');
   const executablePath = path.join(nativeDirectory, target.executable);

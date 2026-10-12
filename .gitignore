@@ -5,3 +5,4 @@
 Thumbs.db
 *.log
 *.tmp
+/npm/release-checksums.json

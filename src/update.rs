@@ -338,30 +338,6 @@ fn install(release: &Release, automatic: bool) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Release;
-
-    #[test]
-    fn standalone_updates_require_explicit_release_immutability() {
-        for immutable in [
-            serde_json::Value::Null,
-            serde_json::json!(false),
-            serde_json::json!(true),
-        ] {
-            let mut json = serde_json::json!({"tag_name":"v0.1.3", "draft":false, "prerelease":false, "assets":[]});
-            if !immutable.is_null() {
-                json["immutable"] = immutable.clone();
-            }
-            let release: Release = serde_json::from_value(json).expect("release");
-            assert_eq!(
-                release.require_immutable().is_ok(),
-                immutable == serde_json::json!(true)
-            );
-        }
-    }
-}
-
 fn verify_binary(path: &Path, version: &Version) -> Result<()> {
     let mut child = Command::new(path)
         .arg("--version")
@@ -400,4 +376,28 @@ fn verify_binary(path: &Path, version: &Version) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Release;
+
+    #[test]
+    fn standalone_updates_require_explicit_release_immutability() {
+        for immutable in [
+            serde_json::Value::Null,
+            serde_json::json!(false),
+            serde_json::json!(true),
+        ] {
+            let mut json = serde_json::json!({"tag_name":"v0.1.3", "draft":false, "prerelease":false, "assets":[]});
+            if !immutable.is_null() {
+                json["immutable"] = immutable.clone();
+            }
+            let release: Release = serde_json::from_value(json).expect("release");
+            assert_eq!(
+                release.require_immutable().is_ok(),
+                immutable == serde_json::json!(true)
+            );
+        }
+    }
 }

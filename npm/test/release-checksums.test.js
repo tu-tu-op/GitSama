@@ -31,5 +31,8 @@ test('release preparation pins all platform binaries and rejects substituted byt
     await assert.rejects(prepare(directory, output), /mismatch/);
     assert.throws(() => validateManifest({ ...manifest, version: '9.9.9' }), /another version/);
     assert.throws(() => validateManifest({ version, assets: {} }), /invalid/);
+    assert.throws(() => validateManifest({ ...manifest, assets: { ...manifest.assets, [assets[0]]: [manifest.assets[assets[0]]] } }), /invalid/);
+    fs.writeFileSync(path.join(directory, `${assets[0]}.sha256`), Buffer.alloc(1025));
+    await assert.rejects(prepare(directory, output), /Invalid release checksum file/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

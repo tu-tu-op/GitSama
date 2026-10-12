@@ -12,7 +12,8 @@ const assets = ['windows-x86_64.exe', 'linux-x86_64', 'macos-x86_64', 'macos-aar
 
 function validateManifest(manifest) {
   if (manifest?.version !== version || !manifest.assets || Object.keys(manifest.assets).length !== assets.length
-      || assets.some((asset) => !Object.hasOwn(manifest.assets, asset) || !/^[a-f\d]{64}$/i.test(manifest.assets[asset]))) {
+      || assets.some((asset) => !Object.hasOwn(manifest.assets, asset)
+        || typeof manifest.assets[asset] !== 'string' || !/^[a-f\d]{64}$/i.test(manifest.assets[asset]))) {
     throw new Error('The packaged release checksum manifest is invalid or belongs to another version.');
   }
   return manifest;
@@ -33,6 +34,10 @@ async function prepare(directory, output = manifestPath) {
   const { fetchBuffer, parseSha256 } = require('./postinstall');
   const checksums = {};
   for (const asset of assets) {
+    if (directory) {
+      const metadata = lstatSync(path.join(directory, `${asset}.sha256`));
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 1024) throw new Error('Invalid release checksum file.');
+    }
     const checksum = directory
       ? await readFile(path.join(directory, `${asset}.sha256`))
       : await fetchBuffer(`https://github.com/tu-tu-op/GitSama/releases/download/v${version}/${asset}.sha256`, 1024);

@@ -535,7 +535,6 @@ fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
         return Ok(false);
     };
     let marker = "# GitSama PATH";
-    let bin_text = bin.to_string_lossy();
     let mut changed = false;
     let profiles: Vec<PathBuf> = if let Some(profile) = std::env::var_os("GITSAMA_SHELL_PROFILE") {
         vec![PathBuf::from(profile)]
@@ -555,13 +554,14 @@ fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
         let mut index = 0;
         let mut profile_changed = false;
         while index < lines.len() {
-            if lines[index].trim() == marker {
+            if lines[index].trim() == marker
+                && lines
+                    .get(index + 1)
+                    .is_some_and(|line| is_managed_path_line(line, bin))
+            {
                 changed = true;
                 profile_changed = true;
-                index += 1;
-                if index < lines.len() && lines[index].contains(bin_text.as_ref()) {
-                    index += 1;
-                }
+                index += 2;
             } else {
                 kept.push(lines[index]);
                 index += 1;
@@ -581,10 +581,40 @@ fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
     Ok(changed)
 }
 
+#[cfg(any(not(windows), test))]
+fn is_managed_path_line(line: &str, bin: &Path) -> bool {
+    let original = bin.to_string_lossy();
+    let escaped = original
+        .replace('\\', "\\\\")
+        .replace('$', "\\$")
+        .replace('`', "\\`")
+        .replace('"', "\\\"");
+    [original.as_ref(), escaped.as_str()]
+        .into_iter()
+        .any(|value| line.trim() == format!("export PATH=\"{value}:$PATH\""))
+}
+
 #[cfg(test)]
 mod tests {
     use super::shell_quote;
     use std::path::Path;
+
+    #[test]
+    fn uninstall_recognizes_escaped_and_legacy_path_lines_without_removing_unrelated_text() {
+        let bin = Path::new("/tmp/home $literal `name` \\\"/.gitsama/bin");
+        assert!(super::is_managed_path_line(
+            r#"export PATH="/tmp/home \$literal \`name\` \\\"/.gitsama/bin:$PATH""#,
+            bin,
+        ));
+        assert!(super::is_managed_path_line(
+            r#"export PATH="/tmp/home $literal `name` \"/.gitsama/bin:$PATH""#,
+            bin,
+        ));
+        assert!(!super::is_managed_path_line(
+            &format!("echo {}", bin.display()),
+            bin,
+        ));
+    }
 
     #[test]
     fn quotes_paths_with_spaces() {

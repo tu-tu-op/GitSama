@@ -50,6 +50,8 @@ The required metadata fields are schema_version, id, name, author, version, desc
 
 Pack IDs contain 1-64 lowercase letters, digits, hyphens, and underscores, and cannot start with a hyphen. Windows device names such as `con`, `nul`, `com1`, and `lpt1` are reserved on all platforms. `starter`, `naruto`, `bleach`, and `ravi-kishan` are reserved for built-in packs during folder imports. An ID is the installed directory name; commands such as `gitsama use` take this lowercase ID. Event paths may contain directories but must stay inside the pack root.
 
+Unicode display names are supported. Metadata and filenames must not contain terminal or bidirectional control characters. Descriptions and contribution source notes may contain ordinary newlines and tabs; single-line fields may not.
+
 ## Audio
 
 GitSama decodes WAV, MP3, OGG, and FLAC with its built-in Rust audio stack. A file must exist, have one of those extensions, and be a regular file. The pack validator checks mappings and files; previews additionally open the audio decoder and play the selected clip. The pack validator rejects absolute paths, parent traversal, unsafe symlinks, and files outside the pack directory.
@@ -116,7 +118,7 @@ An empty template can validate but plays no clips until its event arrays are pop
 
 ## Install and remove
 
-Validate before importing. Import copies the validated directory into the user's GitSama home:
+Validate before importing. Import stages a validated manifest, referenced audio, and an optional `README.md`, then installs them atomically into the user's GitSama home. Unreferenced files, executable scripts, and repository metadata are not copied:
 
 ```sh
 gitsama pack add ./my-custom-pack
@@ -153,8 +155,27 @@ GitSama uses a fresh isolated checkout of `tu-tu-op/GitSama`'s current default b
 
 The PR URL is printed and saved. Repeating the command shows the saved URL. Failed submissions retain their preparation directory under GitSama's `state/`; use its `RECOVERY.md` when available. Creation, preview, invitation, and submission records are stored in `state/pack-<id>.json` outside pack files and cleared when the pack is removed. A scaffolded reinstallation receives a new invitation after its first successful full preview.
 
-## Safety and copyright
+## Safety
 
 Manifests cannot contain shell commands, executable commands, or remote download instructions. GitSama never executes pack files.
+
+## Resource limits
+
+| Item | Limit |
+| --- | --- |
+| Manifest or optional imported README | 1 MiB each |
+| Audio file | 100 MiB |
+| Total unique referenced audio | 512 MiB |
+| Event mappings per manifest / supported audio files discovered during a folder import | 4,096 |
+| Relative audio path | 1,024 bytes, 32 components; use `/` and no `:` |
+| Playback | Ten minutes per clip, or the configured linger limit if shorter |
+| Waiting for another playback worker | 30 seconds maximum; the existing default remains five seconds |
+
+Oversized or unsafe imports stop before the installed pack is created. Sources
+stay in their original folder. Audio still passes through native decoders; these
+limits reduce resource exhaustion and do not make an untrusted audio file a
+sandboxed program.
+
+## Redistribution
 
 Do not include copyrighted anime dialogue, music, or sound effects in this repository without permission to redistribute them. You can create a local pack from media you are legally allowed to use. A public pack contribution must include permission to redistribute every audio file and clear license information. The GitSama MIT license does not apply automatically to pack audio.

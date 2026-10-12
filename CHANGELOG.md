@@ -7,6 +7,9 @@ All notable GitSama changes are recorded here.
 - Preinstall Naruto, Bleach, and Ravi Kishan voice packs, preserving their clip mappings and supporting deletion and explicit restoration. Naruto remains the initial selection and includes its dedicated Pull soundtrack.
 - Add a Pull sound that plays once when a pull changes the current branch, with independent controls and Merge clip fallback for older packs. Up-to-date pulls stay silent; standalone merge and rebase behavior is preserved.
 - Make the README easier to browse with collapsible guides, quick navigation, and a Pull usage reference while preserving the existing documentation.
+- Harden npm upgrades, binary checksum pinning, release provenance, installers, and uninstall ownership checks. Require Node.js 22 or newer and explicit `--yes` for noninteractive uninstall.
+- Keep credentials out of hook logs, persist private state atomically, stage data-only pack imports, and bound pack files, hook input, playback, and queue waits.
+- Pin Actions, restrict release permissions, add dependency and secret scanning, and document private vulnerability reporting and publisher protections in `SECURITY.md`.
 
 ## 0.1.1
 

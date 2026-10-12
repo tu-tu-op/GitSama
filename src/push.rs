@@ -49,6 +49,11 @@ pub fn parse_line(line: &str) -> Result<PushRef> {
             parts.len()
         )));
     }
+    if !git::is_valid_oid(parts[1]) || !git::is_valid_oid(parts[3]) {
+        return Err(Error::message(
+            "pre-push object IDs must be SHA-1 or SHA-256 hexadecimal hashes",
+        ));
+    }
     Ok(PushRef {
         local_ref: parts[0].to_owned(),
         local_object_id: parts[1].to_owned(),
@@ -202,6 +207,7 @@ mod tests {
         assert!(deleted.is_deleted());
         assert_eq!(parse_stdin("").expect("empty"), Vec::<PushRef>::new());
         assert!(parse_line("too short").is_err());
+        assert!(parse_line("refs/heads/main --objects refs/heads/main --all").is_err());
     }
 
     #[test]

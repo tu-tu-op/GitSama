@@ -82,9 +82,7 @@ pub fn fingerprint(pack: &Pack) -> Result<String> {
     for relative in files {
         relative.hash(&mut hasher);
         let path = pack.root.join(relative);
-        fs::read(&path)
-            .map_err(|source| Error::ReadFile { path, source })?
-            .hash(&mut hasher);
+        packs::read_bounded(&path, packs::MAX_AUDIO_BYTES)?.hash(&mut hasher);
     }
     Ok(format!("{:016x}", hasher.finish()))
 }

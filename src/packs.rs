@@ -1,6 +1,7 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
+    io::Read,
     path::{Component, Path, PathBuf},
 };
 
@@ -19,6 +20,10 @@ pub const PACK_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_PACK_ID: &str = "naruto";
 const STARTER_ID: &str = "starter";
 const SUPPORTED_EXTENSIONS: [&str; 4] = ["wav", "mp3", "ogg", "flac"];
+pub(crate) const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_AUDIO_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_PACK_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_PACK_FILES: usize = 4096;
 
 #[derive(Clone, Copy)]
 struct BundledAudio {
@@ -220,10 +225,8 @@ impl Pack {
                 manifest_path.display()
             )));
         }
-        let text = fs::read_to_string(&manifest_path).map_err(|source| Error::ReadFile {
-            path: manifest_path,
-            source,
-        })?;
+        let text = String::from_utf8(read_bounded(&manifest_path, MAX_MANIFEST_BYTES)?)
+            .map_err(|_| Error::Pack("pack manifest must be UTF-8".to_owned()))?;
         let manifest: PackManifest =
             toml::from_str(&text).map_err(|error| Error::Pack(error.to_string()))?;
         validate_manifest(&manifest)?;
@@ -629,6 +632,8 @@ pub fn import_folder(
     reject_existing(&destination)?;
 
     let mut clips = BTreeMap::new();
+    let mut total_bytes = 0_u64;
+    let mut audio_count = 0_usize;
     let mut unmatched = Vec::new();
     let mut directories = vec![source.clone()];
     let audio = source.join("audio");
@@ -665,6 +670,12 @@ pub fn import_folder(
             if !SUPPORTED_EXTENSIONS.contains(&extension.as_str()) {
                 continue;
             }
+            audio_count += 1;
+            if audio_count > MAX_PACK_FILES {
+                return Err(Error::Pack(
+                    "clip folder contains too many audio files (maximum 4096)".to_owned(),
+                ));
+            }
             let metadata = fs::symlink_metadata(&path).map_err(|source| Error::ReadFile {
                 path: path.clone(),
                 source,
@@ -675,6 +686,7 @@ pub fn import_folder(
                     path.display()
                 )));
             }
+            total_bytes = check_audio_size(metadata.len(), total_bytes)?;
             let filename = entry
                 .file_name()
                 .into_string()
@@ -689,6 +701,11 @@ pub fn import_folder(
                 return Err(Error::Pack(format!(
                     "audio filename collision: {filename}; rename one of the clips"
                 )));
+            }
+            if clips.len() > MAX_PACK_FILES {
+                return Err(Error::Pack(
+                    "pack contains too many audio files (maximum 4096)".to_owned(),
+                ));
             }
         }
     }
@@ -964,6 +981,13 @@ pub fn is_valid_id(id: &str) -> bool {
 }
 
 fn validate_audio_files(root: &Path, manifest: &PackManifest) -> Result<()> {
+    let mut total_bytes = 0_u64;
+    let mut seen = BTreeSet::new();
+    if manifest.events.values().map(Vec::len).sum::<usize>() > MAX_PACK_FILES {
+        return Err(Error::Pack(
+            "pack contains too many audio mappings (maximum 4096)".to_owned(),
+        ));
+    }
     for (event, files) in &manifest.events {
         let event = EventKind::parse(event)?;
         for relative in files {
@@ -994,6 +1018,9 @@ fn validate_audio_files(root: &Path, manifest: &PackManifest) -> Result<()> {
                     "audio path is not a regular file: {relative}"
                 )));
             }
+            if seen.insert(canonical) {
+                total_bytes = check_audio_size(metadata.len(), total_bytes)?;
+            }
             let extension = path
                 .extension()
                 .and_then(|value| value.to_str())
@@ -1011,6 +1038,16 @@ fn validate_audio_files(root: &Path, manifest: &PackManifest) -> Result<()> {
 
 fn safe_relative_path(value: &str) -> Result<PathBuf> {
     validate_display_text("audio path", value, false)?;
+    if value.len() > 1024
+        || value.contains(':')
+        || value.contains('\\')
+        || Path::new(value).components().count() > 32
+    {
+        return Err(Error::Pack(
+            "audio paths must be portable relative paths of at most 1024 bytes and 32 components"
+                .to_owned(),
+        ));
+    }
     let path = Path::new(value);
     if value.trim().is_empty() || path.is_absolute() {
         return Err(Error::Pack(format!("audio path must be relative: {value}")));
@@ -1024,6 +1061,41 @@ fn safe_relative_path(value: &str) -> Result<PathBuf> {
         }
     }
     Ok(path.to_path_buf())
+}
+
+fn check_audio_size(size: u64, total: u64) -> Result<u64> {
+    if size > MAX_AUDIO_BYTES || total.saturating_add(size) > MAX_PACK_BYTES {
+        return Err(Error::Pack(
+            "audio exceeds the 100 MiB clip or 512 MiB pack limit".to_owned(),
+        ));
+    }
+    Ok(total + size)
+}
+
+pub(crate) fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| Error::ReadFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(Error::Pack(
+            "pack data must be regular files, not symlinks or devices".to_owned(),
+        ));
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .and_then(|file| file.take(limit + 1).read_to_end(&mut bytes))
+        .map_err(|source| Error::ReadFile {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if bytes.len() as u64 > limit {
+        return Err(Error::Pack(format!(
+            "{} exceeds its size limit",
+            path.display()
+        )));
+    }
+    Ok(bytes)
 }
 
 fn copy_pack(source: &Path, destination: &Path) -> Result<()> {
@@ -1139,6 +1211,40 @@ mod tests {
         assert!(safe_relative_path("../outside.wav").is_err());
         assert!(safe_relative_path("/absolute.wav").is_err());
         assert!(safe_relative_path("").is_err());
+        assert!(safe_relative_path("audio/clip:stream.wav").is_err());
+        assert!(safe_relative_path("audio\\clip.wav").is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_manifests_and_audio_without_allocating_large_buffers() {
+        let directory = tempfile::tempdir().expect("temp");
+        let manifest_path = directory.path().join("pack.toml");
+        let file = fs::File::create(&manifest_path).expect("manifest");
+        file.set_len(super::MAX_MANIFEST_BYTES + 1)
+            .expect("manifest size");
+        assert!(
+            validate(directory.path())
+                .expect_err("oversized")
+                .to_string()
+                .contains("size limit")
+        );
+        fs::create_dir(directory.path().join("audio")).expect("audio");
+        let audio = fs::File::create(directory.path().join("audio/commit.wav")).expect("clip");
+        audio
+            .set_len(super::MAX_AUDIO_BYTES + 1)
+            .expect("clip size");
+        fs::write(
+            &manifest_path,
+            toml::to_string(&manifest("audio/commit.wav")).expect("manifest"),
+        )
+        .expect("write");
+        assert!(
+            validate(directory.path())
+                .expect_err("oversized")
+                .to_string()
+                .contains("100 MiB")
+        );
+        assert!(super::check_audio_size(super::MAX_AUDIO_BYTES, super::MAX_PACK_BYTES).is_err());
     }
 
     #[test]

@@ -114,6 +114,9 @@ fn submit_with(
         return Ok(url.clone());
     }
     let pack = checked_pack(paths, id)?;
+    packs::validate_display_text("author", &metadata.author, false)?;
+    packs::validate_display_text("license", &metadata.license, false)?;
+    packs::validate_display_text("source", &metadata.source, true)?;
     if metadata.author.trim().is_empty()
         || metadata.author.trim().eq_ignore_ascii_case("Your Name")
         || metadata.license.trim().is_empty()
@@ -410,6 +413,7 @@ fn copy_submission(pack: &Pack, metadata: &Metadata, target: &Path) -> Result<BT
         path: target.to_path_buf(),
         source,
     })?;
+    let mut copied_bytes = 0;
     for files in manifest.events.values_mut() {
         for relative in files {
             let original = pack.root.join(&*relative);
@@ -447,10 +451,11 @@ fn copy_submission(pack: &Pack, metadata: &Metadata, target: &Path) -> Result<BT
                         source,
                     },
                 )?;
-                fs::copy(&original, &destination).map_err(|source| Error::WriteFile {
-                    path: destination,
-                    source,
-                })?;
+                copied_bytes += packs::copy_bounded(
+                    &original,
+                    &destination,
+                    packs::MAX_AUDIO_BYTES.min(packs::MAX_PACK_BYTES - copied_bytes),
+                )?;
             }
             *relative = normalized;
         }

@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rodio::{Decoder, OutputStreamBuilder, Sink};
+use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
 use serde::Serialize;
 
 use crate::{
@@ -22,6 +22,9 @@ use crate::{
     paths::AppPaths,
     platform,
 };
+
+const MAX_PLAYBACK_DURATION: Duration = Duration::from_secs(10 * 60);
+const MAX_QUEUE_WAIT_MS: u64 = 30_000;
 
 #[derive(Clone, Debug, Default)]
 pub struct DispatchDetails {
@@ -247,7 +250,7 @@ pub fn play_linger(
         .map_err(|error| Error::Audio(format!("could not open {}: {error}", path.display())))?;
     let decoder = Decoder::try_from(file).map_err(|error| Error::Audio(error.to_string()))?;
     sink.set_volume(f32::from(config.volume) / 100.0);
-    sink.append(decoder);
+    sink.append(decoder.take_duration(cap.min(MAX_PLAYBACK_DURATION)));
 
     let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
         logging::write(
@@ -267,17 +270,11 @@ pub fn play_linger(
         &format!("pid={pid} first sound started for linger {event}"),
     );
 
-    let start = Instant::now();
-    while !sink.empty() {
-        if start.elapsed() >= cap {
-            sink.stop();
-            logging::write(
-                paths,
-                &format!("pid={pid} linger playback cleanly stopped at cap ({cap:?})"),
-            );
-            break;
-        }
-        thread::sleep(Duration::from_millis(25));
+    if !wait_for_playback(&sink, cap.min(MAX_PLAYBACK_DURATION)) {
+        logging::write(
+            paths,
+            &format!("pid={pid} linger playback cleanly stopped at cap ({cap:?})"),
+        );
     }
 
     logging::write(
@@ -373,7 +370,7 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<Playb
     let sink = Sink::connect_new(stream.mixer());
     sink.pause();
     sink.set_volume(f32::from(config.volume) / 100.0);
-    sink.append(decoder);
+    sink.append(decoder.take_duration(MAX_PLAYBACK_DURATION));
 
     let Some(_lock) = PlaybackLock::acquire(paths, config.queue_max_age_ms)? else {
         logging::write(
@@ -386,12 +383,29 @@ pub fn play(paths: &AppPaths, config: &Config, event: EventKind) -> Result<Playb
 
     sink.play();
     logging::write(paths, &format!("pid={pid} first sound started for {event}"));
-    sink.sleep_until_end();
+    if !wait_for_playback(&sink, MAX_PLAYBACK_DURATION) {
+        logging::write(
+            paths,
+            &format!("pid={pid} playback stopped at the 10 minute safety limit"),
+        );
+    }
     logging::write(paths, &format!("pid={pid} playback finished for {event}"));
     Ok(PlaybackOutcome::Played {
         resolved_event,
         path,
     })
+}
+
+fn wait_for_playback(sink: &Sink, cap: Duration) -> bool {
+    let start = Instant::now();
+    while !sink.empty() {
+        if start.elapsed() >= cap {
+            sink.stop();
+            return false;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    true
 }
 
 fn resolve_enabled(
@@ -465,7 +479,7 @@ impl PlaybackLock {
         paths.ensure_layout()?;
         let path = paths.state.join("playback.lock");
         let start = Instant::now();
-        let max_age = Duration::from_millis(max_age_ms);
+        let max_age = Duration::from_millis(max_age_ms.min(MAX_QUEUE_WAIT_MS));
 
         loop {
             match fs::create_dir(&path) {
@@ -478,7 +492,16 @@ impl PlaybackLock {
                 },
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     if lock_is_stale(&path, max_age) {
-                        let _ = fs::remove_dir_all(&path);
+                        match fs::remove_dir_all(&path) {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(source) => {
+                                return Err(Error::WriteFile {
+                                    path: path.clone(),
+                                    source,
+                                });
+                            }
+                        }
                         continue;
                     }
                     if start.elapsed() >= max_age {
@@ -597,6 +620,19 @@ mod tests {
     use crate::{config::Config, events::EventKind, packs::Pack};
 
     #[test]
+    fn playback_wait_terminates_even_when_an_audio_source_never_finishes() {
+        let (sink, _output) = rodio::Sink::new();
+        sink.append(rodio::source::SineWave::new(440.0));
+        sink.pause();
+        let start = std::time::Instant::now();
+        assert!(!super::wait_for_playback(
+            &sink,
+            std::time::Duration::from_millis(5)
+        ));
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
     fn lock_is_released() {
         let directory = tempfile::tempdir().expect("temp");
         let paths = AppPaths::from_root(directory.path().join(".gitsama"));
@@ -628,6 +664,29 @@ mod tests {
             "Lock took too long to reclaim"
         );
         drop(lock);
+    }
+
+    #[test]
+    fn an_unremovable_stale_lock_cannot_spin_forever() {
+        let directory = tempfile::tempdir().expect("temp");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        let file = fs::File::create(paths.state.join("playback.lock")).expect("broken lock");
+        file.set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .expect("stale timestamp");
+        drop(file);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender
+                .send(PlaybackLock::acquire(&paths, 1000).is_err())
+                .expect("result")
+        });
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("lock acquisition must terminate")
+        );
+        worker.join().expect("worker");
     }
 
     #[test]

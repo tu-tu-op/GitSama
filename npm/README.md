@@ -1,13 +1,13 @@
 # GitSama for npm
 
-Install GitSama globally with Node.js 18 or newer and Git 2.54 or newer:
+Install GitSama globally with Node.js 22 or newer and Git 2.54 or newer:
 
 ```sh
 npm install --global gitsama
 ```
 
 The install script downloads the matching prebuilt GitSama binary, checks its
-SHA-256 digest, and registers Git's named hooks for the current user. Rust is
+SHA-256 digest against hashes pinned inside this npm package, and registers Git's named hooks for the current user. Rust is
 not required. The binary includes Naruto, Bleach, and Ravi Kishan voice packs.
 
 After installation, run `gitsama doctor` to verify the setup. For all commands,
@@ -35,3 +35,6 @@ npm install --global gitsama@latest
 Set `GITSAMA_NO_UPDATE_CHECK=1` to disable automatic checks. Hooks and
 noninteractive commands do not check automatically. Local npm installations
 print the update command to run in their project.
+
+For vulnerability reports and security limits, see the
+[security policy](https://github.com/tu-tu-op/GitSama/blob/main/SECURITY.md).

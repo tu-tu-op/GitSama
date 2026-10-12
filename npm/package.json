@@ -15,7 +15,7 @@
   "keywords": ["git", "cli", "audio", "developer-tools"],
   "preferGlobal": true,
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "bin": {
     "gitsama": "bin/gitsama.js"
@@ -24,11 +24,15 @@
     "bin/gitsama.js",
     "scripts/postinstall.js",
     "scripts/upgrade.js",
-    "scripts/preuninstall.js"
+    "scripts/preuninstall.js",
+    "scripts/release-checksums.js",
+    "release-checksums.json"
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
     "preuninstall": "node scripts/preuninstall.js",
+    "prepare-release": "node scripts/release-checksums.js",
+    "prepublishOnly": "node scripts/release-checksums.js --check",
     "test": "node --test"
   }
 }

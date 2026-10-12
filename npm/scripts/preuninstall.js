@@ -12,7 +12,7 @@ const executable = path.join(
 );
 
 if (existsSync(executable)) {
-  const result = spawnSync(executable, ['uninstall', '--keep-data'], {
+  const result = spawnSync(executable, ['uninstall', '--keep-data', '--yes'], {
     stdio: 'inherit',
     env: { ...process.env, GITSAMA_NONINTERACTIVE: '1' },
   });

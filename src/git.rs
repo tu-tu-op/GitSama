@@ -265,6 +265,10 @@ pub fn is_zero_oid(value: &str) -> bool {
     !value.is_empty() && value.chars().all(|character| character == '0')
 }
 
+pub fn is_valid_oid(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{GitVersion, is_zero_oid};

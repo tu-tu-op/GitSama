@@ -6,7 +6,7 @@ TEMP_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEMP_ROOT"' EXIT HUP INT TERM
 FIXTURES="$TEMP_ROOT/fixtures"
 BIN="$TEMP_ROOT/mock-bin"
-HOME_DIR="$TEMP_ROOT/home"
+HOME_DIR="$TEMP_ROOT/home \$GITSAMA_PROFILE_INJECTED \`printf injected\`"
 WORK="$TEMP_ROOT/work"
 VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/Cargo.toml" | head -n 1)
 ASSET="gitsama-v$VERSION-linux-x86_64.tar.gz"
@@ -71,3 +71,26 @@ chmod 755 "$BIN/git" "$BIN/uname" "$BIN/curl"
 )
 
 test "$(cat "$TEMP_ROOT/selected-binary")" = release
+(
+  GITSAMA_PROFILE_INJECTED=injected
+  export GITSAMA_PROFILE_INJECTED
+  . "$HOME_DIR/.profile"
+  case "$PATH" in "$HOME_DIR/.gitsama/bin:"*) ;; *) echo "Profile path was interpreted as shell code" >&2; exit 1 ;; esac
+)
+
+printf unexpected > "$FIXTURES/extra-file"
+tar -czf "$FIXTURES/$ASSET" -C "$FIXTURES" gitsama extra-file
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$FIXTURES" && sha256sum "$ASSET" > "$ASSET.sha256")
+else
+  (cd "$FIXTURES" && shasum -a 256 "$ASSET" > "$ASSET.sha256")
+fi
+if (
+  cd "$WORK"
+  export PATH="$BIN:$PATH" HOME="$HOME_DIR"
+  export GITSAMA_TEST_FIXTURES="$FIXTURES" GITSAMA_TEST_MARKER="$TEMP_ROOT/selected-binary"
+  cat "$ROOT/install.sh" | sh
+); then
+  echo "Installer accepted an archive with unexpected entries" >&2
+  exit 1
+fi

@@ -137,7 +137,10 @@ impl Config {
                 "playback_mode must be 'auto', 'detached', or 'linger'".to_owned(),
             ));
         }
-        if self.linger_cap_secs <= 0.0 || self.linger_cap_secs > 30.0 {
+        if !self.linger_cap_secs.is_finite()
+            || self.linger_cap_secs <= 0.0
+            || self.linger_cap_secs > 30.0
+        {
             return Err(Error::Config(
                 "linger_cap_secs must be between 0.1 and 30.0".to_owned(),
             ));
@@ -180,10 +183,7 @@ impl Config {
         let text = toml::to_string_pretty(self).map_err(|error| {
             Error::Config(format!("could not serialize configuration: {error}"))
         })?;
-        fs::write(&paths.config, text).map_err(|source| Error::WriteFile {
-            path: paths.config.clone(),
-            source,
-        })
+        crate::paths::write_atomic(&paths.config, text.as_bytes())
     }
 
     pub fn is_event_enabled(&self, event: EventKind) -> bool {
@@ -300,6 +300,8 @@ mod tests {
         assert!(Config::parse("playback_mode = 'invalid'").is_err());
         assert!(Config::parse("linger_cap_secs = 0.0").is_err());
         assert!(Config::parse("linger_cap_secs = 35.0").is_err());
+        assert!(Config::parse("linger_cap_secs = nan").is_err());
+        assert!(Config::parse("linger_cap_secs = inf").is_err());
     }
 
     #[test]

@@ -305,6 +305,66 @@ fn ci_has_supported_git_for_configured_hooks() {
 }
 
 #[test]
+fn hook_logs_never_include_remote_credentials() {
+    let sandbox = Sandbox::new();
+    let secret = "GITSAMA_SYNTHETIC_SECRET";
+    let output = sandbox.tool(
+        None,
+        &[
+            "hook",
+            "pre-push",
+            "origin",
+            &format!("https://audit:{secret}@example.invalid/repo.git"),
+        ],
+    );
+    assert!(output.status.success());
+    let log = fs::read_to_string(sandbox.home.join("logs/gitsama.log")).expect("diagnostic log");
+    assert!(log.contains("hook entered: pre-push"));
+    assert!(!log.contains(secret));
+    assert!(!log.contains("example.invalid"));
+}
+
+#[test]
+fn uninstall_requires_consent_and_preserves_unrelated_data() {
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let denied = sandbox.tool(None, &["uninstall"]);
+    assert!(!denied.status.success());
+    assert!(String::from_utf8_lossy(&denied.stderr).contains("--yes"));
+    assert!(sandbox.home.join("config.toml").exists());
+    fs::write(sandbox.home.join("private.txt"), "must survive").expect("extra data");
+    let denied = sandbox.tool(None, &["uninstall", "--yes"]);
+    assert!(!denied.status.success());
+    assert!(sandbox.home.join("private.txt").exists());
+    sandbox.tool_ok(None, &["uninstall", "--keep-data", "--yes"]);
+    assert!(sandbox.home.join("private.txt").exists());
+    assert!(sandbox.home.join("config.toml").exists());
+}
+
+#[test]
+fn managed_uninstall_handles_literal_percent_paths_without_a_shell() {
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let executable = sandbox.home.join("bin").join(if cfg!(windows) {
+        "Git Sama %GITSAMA_AUDIT_VALUE%.exe"
+    } else {
+        "Git Sama %GITSAMA_AUDIT_VALUE%"
+    });
+    fs::copy(env!("CARGO_BIN_EXE_gitsama"), &executable).expect("managed binary");
+    let output = sandbox.tool_path(&executable, None, &["uninstall", "--yes"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!sandbox.home.exists(), "owned data root should be removed");
+    assert!(
+        Path::new(env!("CARGO_BIN_EXE_gitsama")).exists(),
+        "test build must survive"
+    );
+}
+
+#[test]
 fn commit_hook_dispatches_one_event() {
     if skip_if_unsupported() {
         return;
@@ -1312,4 +1372,21 @@ fn dead_process_lock_is_reclaimed_by_hook() {
     sandbox.commit(&repo, "recovery commit");
     let events = sandbox.wait_for_events(1);
     assert_eq!(events, vec!["commit"]);
+}
+#[test]
+fn installed_pack_directory_remains_usable_but_cannot_be_deleted_under_the_caller() {
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let pack_directory = sandbox.home.join("packs").join("starter");
+    sandbox.tool_ok(Some(&pack_directory), &["pack", "validate", "."]);
+    sandbox.tool_ok(Some(&pack_directory), &["test", "commit"]);
+    let output = sandbox.tool(Some(&pack_directory), &["uninstall", "--yes"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("working directory"));
+    assert!(pack_directory.is_dir());
+    sandbox.tool_ok(
+        Some(&pack_directory),
+        &["uninstall", "--yes", "--keep-data"],
+    );
+    assert!(pack_directory.is_dir());
 }

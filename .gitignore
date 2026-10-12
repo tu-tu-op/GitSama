@@ -5,3 +5,11 @@
 Thumbs.db
 *.log
 *.tmp
+/npm/release-checksums.json
+/.gitsama/
+.env
+.env.*
+!.env.example
+*.key
+*.p12
+*.pfx

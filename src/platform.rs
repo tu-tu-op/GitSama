@@ -430,49 +430,32 @@ pub fn process_exists(pid: u32) -> bool {
 }
 
 pub fn schedule_cleanup(executable: &Path, data_root: Option<&Path>) -> Result<()> {
-    #[cfg(windows)]
-    {
-        let executable = windows_cmd_quote(executable);
-        let cleanup = data_root.map(windows_cmd_quote);
-        let mut command_text =
-            String::from("cd /d \"%TEMP%\" >nul 2>nul & timeout /t 1 /nobreak >nul");
-        command_text.push_str(" & del /f /q ");
-        command_text.push_str(&executable);
-        if let Some(root) = cleanup {
-            command_text.push_str(" & rmdir /s /q ");
-            command_text.push_str(&root);
-        }
-        Command::new("cmd.exe")
-            .args(["/C", &command_text])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| Error::message(format!("could not schedule Windows cleanup: {error}")))
+    let current = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| Error::message(format!("could not locate the running binary: {error}")))?;
+    let executable = executable
+        .canonicalize()
+        .map_err(|source| Error::ReadFile {
+            path: executable.to_path_buf(),
+            source,
+        })?;
+    if current != executable {
+        return Err(Error::message(
+            "cleanup can only remove the running GitSama executable",
+        ));
     }
-    #[cfg(not(windows))]
-    {
-        let script = if data_root.is_some() {
-            "sleep 1; rm -f -- \"$1\"; rm -rf -- \"$2\""
-        } else {
-            "sleep 1; rm -f -- \"$1\""
-        };
-        let mut command = Command::new("sh");
-        command
-            .args(["-c", script, "gitsama-cleanup"])
-            .arg(executable)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Some(root) = data_root {
-            command.arg(root);
-        }
-        command
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| Error::message(format!("could not schedule cleanup: {error}")))
+    if let Some(root) = data_root {
+        let root = crate::paths::AppPaths::from_root(root.to_path_buf()).validate_removal()?;
+        self_replace::self_delete_outside_path(&root).map_err(|error| {
+            Error::message(format!("could not remove the installed binary: {error}"))
+        })?;
+        std::fs::remove_dir_all(&root).map_err(|source| Error::WriteFile { path: root, source })?;
+    } else {
+        self_replace::self_delete().map_err(|error| {
+            Error::message(format!("could not remove the installed binary: {error}"))
+        })?;
     }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -546,18 +529,12 @@ fn normalize_windows_path(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
-#[cfg(windows)]
-fn windows_cmd_quote(path: &Path) -> String {
-    format!("\"{}\"", path.to_string_lossy().replace('"', "\\\""))
-}
-
 #[cfg(not(windows))]
 fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
     let Some(home) = dirs::home_dir() else {
         return Ok(false);
     };
     let marker = "# GitSama PATH";
-    let bin_text = bin.to_string_lossy();
     let mut changed = false;
     let profiles: Vec<PathBuf> = if let Some(profile) = std::env::var_os("GITSAMA_SHELL_PROFILE") {
         vec![PathBuf::from(profile)]
@@ -577,13 +554,14 @@ fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
         let mut index = 0;
         let mut profile_changed = false;
         while index < lines.len() {
-            if lines[index].trim() == marker {
+            if lines[index].trim() == marker
+                && lines
+                    .get(index + 1)
+                    .is_some_and(|line| is_managed_path_line(line, bin))
+            {
                 changed = true;
                 profile_changed = true;
-                index += 1;
-                if index < lines.len() && lines[index].contains(bin_text.as_ref()) {
-                    index += 1;
-                }
+                index += 2;
             } else {
                 kept.push(lines[index]);
                 index += 1;
@@ -603,10 +581,40 @@ fn remove_unix_path_markers(bin: &Path) -> Result<bool> {
     Ok(changed)
 }
 
+#[cfg(any(not(windows), test))]
+fn is_managed_path_line(line: &str, bin: &Path) -> bool {
+    let original = bin.to_string_lossy();
+    let escaped = original
+        .replace('\\', "\\\\")
+        .replace('$', "\\$")
+        .replace('`', "\\`")
+        .replace('"', "\\\"");
+    [original.as_ref(), escaped.as_str()]
+        .into_iter()
+        .any(|value| line.trim() == format!("export PATH=\"{value}:$PATH\""))
+}
+
 #[cfg(test)]
 mod tests {
     use super::shell_quote;
     use std::path::Path;
+
+    #[test]
+    fn uninstall_recognizes_escaped_and_legacy_path_lines_without_removing_unrelated_text() {
+        let bin = Path::new("/tmp/home $literal `name` \\\"/.gitsama/bin");
+        assert!(super::is_managed_path_line(
+            r#"export PATH="/tmp/home \$literal \`name\` \\\"/.gitsama/bin:$PATH""#,
+            bin,
+        ));
+        assert!(super::is_managed_path_line(
+            r#"export PATH="/tmp/home $literal `name` \"/.gitsama/bin:$PATH""#,
+            bin,
+        ));
+        assert!(!super::is_managed_path_line(
+            &format!("echo {}", bin.display()),
+            bin,
+        ));
+    }
 
     #[test]
     fn quotes_paths_with_spaces() {

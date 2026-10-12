@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+umask 077
 
 REPOSITORY="tu-tu-op/GitSama"
 USER_HOME=$(printenv HOME 2>/dev/null || true)
@@ -22,6 +23,11 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ] \
   if [ -z "${GITSAMA_VERSION:-}" ]; then
     VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$SCRIPT_DIR/Cargo.toml" | head -n 1)
   fi
+fi
+
+if ! printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "GitSama version must be a stable major.minor.patch version." >&2
+  exit 1
 fi
 
 if ! command -v git >/dev/null 2>&1; then
@@ -67,13 +73,21 @@ else
   URL="https://github.com/$REPOSITORY/releases/download/v$VERSION/$ASSET"
   echo "Downloading $URL"
   if command -v curl >/dev/null 2>&1; then
-    curl --fail --location --silent --show-error "$URL" --output "$ARCHIVE"
-    curl --fail --location --silent --show-error "$URL.sha256" --output "$CHECKSUM"
+    curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 120 --max-filesize 104857600 --silent --show-error "$URL" --output "$ARCHIVE"
+    curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 30 --max-filesize 1024 --silent --show-error "$URL.sha256" --output "$CHECKSUM"
   elif command -v wget >/dev/null 2>&1; then
-    wget --quiet --output-document "$ARCHIVE" "$URL"
-    wget --quiet --output-document "$CHECKSUM" "$URL.sha256"
+    wget --https-only --timeout=30 --tries=2 --quiet --output-document "$ARCHIVE" "$URL"
+    wget --https-only --timeout=30 --tries=2 --quiet --output-document "$CHECKSUM" "$URL.sha256"
   else
     echo "Install Rust/Cargo or install curl/wget to download the release." >&2
+    exit 1
+  fi
+  if [ "$(wc -c < "$ARCHIVE")" -gt 104857600 ] || [ "$(wc -c < "$CHECKSUM")" -gt 1024 ]; then
+    echo "Release download exceeds its size limit." >&2
+    exit 1
+  fi
+  if ! awk -v asset="$ASSET" '{ filename = $2; sub(/^\*/, "", filename); if (NF != 2 || filename != asset || length($1) != 64 || $1 ~ /[^0-9a-fA-F]/) bad = 1 } END { exit (bad || NR != 1) }' "$CHECKSUM"; then
+    echo "Checksum must name exactly the expected release archive." >&2
     exit 1
   fi
   if command -v sha256sum >/dev/null 2>&1; then
@@ -85,7 +99,16 @@ else
     exit 1
   fi
   mkdir -p "$TEMP_DIR/unpacked"
-  tar -xzf "$ARCHIVE" -C "$TEMP_DIR/unpacked"
+  if [ "$(tar -tzf "$ARCHIVE")" != gitsama ]; then
+    echo "Release archive must contain only the gitsama executable." >&2
+    exit 1
+  fi
+  # Extract a named member to a regular file; archive paths are never written.
+  (ulimit -f 204800 2>/dev/null || :; tar -xOzf "$ARCHIVE" gitsama) > "$TEMP_DIR/unpacked/gitsama"
+  if [ "$(wc -c < "$TEMP_DIR/unpacked/gitsama")" -gt 104857600 ]; then
+    echo "Extracted binary exceeds its size limit." >&2
+    exit 1
+  fi
   SOURCE="$TEMP_DIR/unpacked/gitsama"
 fi
 
@@ -107,10 +130,11 @@ if [ -z "$PROFILE" ]; then
   esac
 fi
 if [ ! -f "$PROFILE" ] || ! grep -Fq "# GitSama PATH" "$PROFILE"; then
+  QUOTED_BIN_DIR=$(printf '%s' "$BIN_DIR" | sed 's/[\\$`"]/\\&/g')
   {
     echo ""
     echo "# GitSama PATH"
-    echo "export PATH=\"$BIN_DIR:\$PATH\""
+    printf 'export PATH="%s:$PATH"\n' "$QUOTED_BIN_DIR"
   } >> "$PROFILE"
   echo "Added $BIN_DIR to $PROFILE"
 fi

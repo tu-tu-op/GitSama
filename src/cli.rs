@@ -86,6 +86,8 @@ pub enum Command {
     Uninstall {
         #[arg(long)]
         keep_data: bool,
+        #[arg(long, help = "Approve uninstallation without prompting")]
+        yes: bool,
     },
     #[command(hide = true)]
     Hook {
@@ -187,7 +189,7 @@ pub fn run() -> Result<()> {
         Some(Command::OffHere) => off_here(),
         Some(Command::OnHere) => on_here(),
         Some(Command::Doctor { fix }) => crate::doctor::run(fix),
-        Some(Command::Uninstall { keep_data }) => uninstall(keep_data),
+        Some(Command::Uninstall { keep_data, yes }) => uninstall(keep_data, yes),
         Some(Command::Hook { event, args }) => hooks::run_fail_open(&event, &args),
         Some(Command::Play { event }) => {
             let paths = AppPaths::discover()?;
@@ -813,7 +815,7 @@ fn set_playback_mode(value: &str) -> Result<()> {
 }
 
 fn set_linger_cap(value: f64) -> Result<()> {
-    if value <= 0.0 || value > 30.0 {
+    if !value.is_finite() || value <= 0.0 || value > 30.0 {
         return Err(Error::message(
             "linger cap must be between 0.1 and 30.0 seconds",
         ));
@@ -893,8 +895,21 @@ fn on_here() -> Result<()> {
     Ok(())
 }
 
-fn uninstall(keep_data: bool) -> Result<()> {
-    let paths = AppPaths::discover()?;
+fn uninstall(keep_data: bool, yes: bool) -> Result<()> {
+    let mut paths = AppPaths::discover()?;
+    if paths.root.exists() {
+        let root = if keep_data {
+            paths.validate_root_location()?
+        } else {
+            paths.validate_removal()?
+        };
+        paths = AppPaths::from_root(root);
+    }
+    if !yes && !interactive() {
+        return Err(Error::message(
+            "use gitsama uninstall --yes to approve a noninteractive uninstall",
+        ));
+    }
     println!("GitSama uninstall");
     println!();
     println!("This removes GitSama's named global hooks and:");
@@ -905,7 +920,7 @@ fn uninstall(keep_data: bool) -> Result<()> {
         println!("  {}", paths.root.display());
     }
     println!();
-    if interactive() && !prompt_yes_no("Continue? [y/N] ", false)? {
+    if !yes && interactive() && !prompt_yes_no("Continue? [y/N] ", false)? {
         println!("Nothing removed.");
         return Ok(());
     }

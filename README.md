@@ -18,13 +18,13 @@ The npm package is available. The Homebrew tap is not published yet; macOS users
 
 ### npm (Windows, macOS, and Linux)
 
-Requires Node.js 18 or newer and npm:
+Requires Node.js 22 or newer and npm:
 
 ~~~sh
 npm install --global gitsama
 ~~~
 
-The npm package downloads the prebuilt binary for your OS and architecture, verifies its SHA-256 checksum, and registers GitSama's named hooks for your user. The Naruto, Bleach, and Ravi Kishan voice packs are bundled in the binary.
+The npm package downloads the prebuilt binary for your OS and architecture, verifies its SHA-256 checksum against hashes pinned inside the npm package, and registers GitSama's named hooks for your user. The Naruto, Bleach, and Ravi Kishan voice packs are bundled in the binary.
 
 Check your setup and hear the active pack's Pull clip:
 
@@ -444,7 +444,7 @@ Other update commands:
 | `gitsama upgrade --check` | Check now without installing anything. |
 | `gitsama upgrade --yes` | Approve installation without a prompt, including in scripts. |
 
-For a source or standalone installation, GitSama downloads the official binary for your platform, checks its SHA-256 checksum and version, and replaces the executable. For a global npm installation, it updates the whole npm package after the running binary exits. Packs, volume, settings, and contribution records are preserved. A local npm installation prints a command to run in its project; Homebrew installations use `brew upgrade gitsama`.
+For a source or standalone installation, GitSama requires an immutable official release, downloads the binary for your platform, checks its SHA-256 checksum and version, and replaces the executable. For a global npm installation, it updates the whole npm package after the running binary exits. Packs, volume, settings, and contribution records are preserved. A local npm installation prints a command to run in its project; Homebrew installations use `brew upgrade gitsama`.
 
 Git hooks, audio workers, help/version output, uninstallation, and noninteractive commands do not perform automatic update checks. Offline or failed checks leave your normal command working. Set `GITSAMA_NO_UPDATE_CHECK=1` to disable automatic checks; the explicit upgrade commands still work.
 
@@ -666,7 +666,7 @@ No. GitSama is installed per user. Only local Git operations performed on a comp
 <details>
 <summary><strong>Do I need Rust or Node.js?</strong></summary>
 
-No Rust toolchain is required when installing a prebuilt release or using a package manager. The npm installation method requires Node.js 18 or newer and npm. A source build requires Rust and Cargo.
+No Rust toolchain is required when installing a prebuilt release or using a package manager. The npm installation method requires Node.js 22 or newer and npm. A source build requires Rust and Cargo.
 
 </details>
 
@@ -764,6 +764,10 @@ Permanent files are stored in:
 - Windows: %USERPROFILE%\.gitsama
 - macOS and Linux: ~/.gitsama
 
+GitSama creates an ownership marker in this directory. On macOS and Linux its data directories are private to your user. If you set `GITSAMA_HOME`, use a dedicated real directory rather than a symlink, your user home, or a Git repository. Logs exclude hook arguments, including remote URL credentials.
+
+See the [security policy](SECURITY.md) for private vulnerability reports, resource limits, and release protections.
+
 The only repository-local setting is the opt-out written by gitsama off-here to that repository's .git/config. It is not committed.
 
 </details>
@@ -778,6 +782,8 @@ gitsama uninstall
 ~~~
 
 The uninstall command removes GitSama's named global hooks, its identifiable PATH entry, the managed executable, and the per-user GitSama directory. It leaves unrelated hooks and repositories alone.
+
+Scripts and noninteractive terminals must pass `--yes`: `gitsama uninstall --yes`. Uninstall refuses a data directory containing unrelated top-level files or your current working directory; move outside the data directory or use `--keep-data` as appropriate.
 
 For an npm installation, use:
 

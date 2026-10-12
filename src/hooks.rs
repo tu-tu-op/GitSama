@@ -150,6 +150,22 @@ pub fn list_native_hook(native_event: &str) -> Result<String> {
 const BRANCH_DEDUP_MAX_AGE_MS: u64 = 5_000;
 const BRANCH_DEDUP_DELAY_MS: u64 = 180;
 const BRANCH_RECENT_AGE_MS: u64 = 5_000;
+const MAX_HOOK_INPUT_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_BRANCH_EVENTS: usize = 128;
+
+fn read_hook_input(reader: impl Read) -> std::io::Result<String> {
+    let mut input = String::new();
+    reader
+        .take(MAX_HOOK_INPUT_BYTES + 1)
+        .read_to_string(&mut input)?;
+    if input.len() as u64 > MAX_HOOK_INPUT_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "hook input exceeds 4 MiB",
+        ));
+    }
+    Ok(input)
+}
 
 fn branch_operation_identity() -> Result<String> {
     let repository = git::repository_identity()?;
@@ -207,7 +223,10 @@ fn run_inner(native_event: &str, args: &[String]) -> Result<()> {
     let job_info = platform::current_job_info();
     logging::write(
         &paths,
-        &format!("pid={pid} hook entered: {native_event} args={args:?} [{job_info}]"),
+        &format!(
+            "pid={pid} hook entered: {native_event} argument_count={} [{job_info}]",
+            args.len()
+        ),
     );
     let config = Config::load_or_default(&paths);
     let pulling = env::var("GIT_REFLOG_ACTION")
@@ -265,11 +284,13 @@ fn dispatch(
 }
 
 fn handle_push(paths: &AppPaths, config: &Config, args: &[String]) -> Result<()> {
-    let mut input = String::new();
-    if let Err(error) = std::io::stdin().read_to_string(&mut input) {
-        logging::write(paths, &format!("pre-push input unavailable: {error}"));
-        return dispatch(paths, config, EventKind::Push, DispatchDetails::default());
-    }
+    let input = match read_hook_input(std::io::stdin()) {
+        Ok(input) => input,
+        Err(error) => {
+            logging::write(paths, &format!("pre-push input unavailable: {error}"));
+            return dispatch(paths, config, EventKind::Push, DispatchDetails::default());
+        }
+    };
     let refs = match push::parse_stdin(&input) {
         Ok(refs) => refs,
         Err(error) => {
@@ -347,9 +368,7 @@ fn handle_transaction(
     if args.first().map(String::as_str) != Some("committed") {
         return Ok(());
     }
-    let mut input = String::new();
-    std::io::stdin()
-        .read_to_string(&mut input)
+    let input = read_hook_input(std::io::stdin())
         .map_err(|error| Error::Git(format!("could not read reference transaction: {error}")))?;
     if !input
         .lines()
@@ -366,7 +385,11 @@ fn handle_transaction(
     // During switch -c / checkout -b, HEAD still names the previous branch
     // when the new branch's ref transaction commits.
     let current_branch = git::current_branch().ok();
-    for line in input.lines() {
+    for line in input
+        .lines()
+        .filter(|line| parse_transaction_line(line).is_some())
+        .take(MAX_BRANCH_EVENTS)
+    {
         let Some((old_value, new_value, reference)) = parse_transaction_line(line) else {
             continue;
         };
@@ -460,7 +483,11 @@ fn parse_transaction_line(line: &str) -> Option<(&str, &str, &str)> {
     let old_value = parts.next()?;
     let new_value = parts.next()?;
     let reference = parts.next()?;
-    if parts.next().is_some() || !reference.starts_with("refs/heads/") {
+    if parts.next().is_some()
+        || !reference.starts_with("refs/heads/")
+        || !git::is_valid_oid(old_value)
+        || !git::is_valid_oid(new_value)
+    {
         return None;
     }
     Some((old_value, new_value, reference))
@@ -609,5 +636,18 @@ mod tests {
             Some((old.as_str(), new.as_str(), "refs/heads/feature"))
         );
         assert!(parse_transaction_line("refs/heads/feature old new").is_none());
+    }
+
+    #[test]
+    fn hook_input_is_bounded_and_object_ids_cannot_be_options() {
+        assert_eq!(
+            super::read_hook_input(&b"normal input"[..]).expect("input"),
+            "normal input"
+        );
+        let input = vec![b'x'; super::MAX_HOOK_INPUT_BYTES as usize + 2];
+        let mut reader = std::io::Cursor::new(input);
+        assert!(super::read_hook_input(&mut reader).is_err());
+        assert_eq!(reader.position(), super::MAX_HOOK_INPUT_BYTES + 1);
+        assert!(super::parse_transaction_line("--objects --all refs/heads/main").is_none());
     }
 }

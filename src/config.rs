@@ -137,7 +137,10 @@ impl Config {
                 "playback_mode must be 'auto', 'detached', or 'linger'".to_owned(),
             ));
         }
-        if self.linger_cap_secs <= 0.0 || self.linger_cap_secs > 30.0 {
+        if !self.linger_cap_secs.is_finite()
+            || self.linger_cap_secs <= 0.0
+            || self.linger_cap_secs > 30.0
+        {
             return Err(Error::Config(
                 "linger_cap_secs must be between 0.1 and 30.0".to_owned(),
             ));
@@ -300,6 +303,8 @@ mod tests {
         assert!(Config::parse("playback_mode = 'invalid'").is_err());
         assert!(Config::parse("linger_cap_secs = 0.0").is_err());
         assert!(Config::parse("linger_cap_secs = 35.0").is_err());
+        assert!(Config::parse("linger_cap_secs = nan").is_err());
+        assert!(Config::parse("linger_cap_secs = inf").is_err());
     }
 
     #[test]

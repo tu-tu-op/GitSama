@@ -813,7 +813,7 @@ fn set_playback_mode(value: &str) -> Result<()> {
 }
 
 fn set_linger_cap(value: f64) -> Result<()> {
-    if value <= 0.0 || value > 30.0 {
+    if !value.is_finite() || value <= 0.0 || value > 30.0 {
         return Err(Error::message(
             "linger cap must be between 0.1 and 30.0 seconds",
         ));

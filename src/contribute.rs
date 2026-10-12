@@ -413,6 +413,7 @@ fn copy_submission(pack: &Pack, metadata: &Metadata, target: &Path) -> Result<BT
         path: target.to_path_buf(),
         source,
     })?;
+    let mut copied_bytes = 0;
     for files in manifest.events.values_mut() {
         for relative in files {
             let original = pack.root.join(&*relative);
@@ -450,10 +451,11 @@ fn copy_submission(pack: &Pack, metadata: &Metadata, target: &Path) -> Result<BT
                         source,
                     },
                 )?;
-                fs::copy(&original, &destination).map_err(|source| Error::WriteFile {
-                    path: destination,
-                    source,
-                })?;
+                copied_bytes += packs::copy_bounded(
+                    &original,
+                    &destination,
+                    packs::MAX_AUDIO_BYTES.min(packs::MAX_PACK_BYTES - copied_bytes),
+                )?;
             }
             *relative = normalized;
         }

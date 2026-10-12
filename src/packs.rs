@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::Read,
+    io::{self, Read},
     path::{Component, Path, PathBuf},
 };
 
@@ -22,7 +22,7 @@ const STARTER_ID: &str = "starter";
 const SUPPORTED_EXTENSIONS: [&str; 4] = ["wav", "mp3", "ogg", "flac"];
 pub(crate) const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 pub(crate) const MAX_AUDIO_BYTES: u64 = 100 * 1024 * 1024;
-const MAX_PACK_BYTES: u64 = 512 * 1024 * 1024;
+pub(crate) const MAX_PACK_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_PACK_FILES: usize = 4096;
 
 #[derive(Clone, Copy)]
@@ -521,7 +521,21 @@ pub fn install(paths: &AppPaths, source: impl AsRef<Path>) -> Result<PackSummary
             source_pack.manifest.id
         )));
     }
-    copy_pack(source, &destination)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".pack-install-")
+        .tempdir_in(&paths.packs)
+        .map_err(|source| Error::WriteFile {
+            path: paths.packs.clone(),
+            source,
+        })?;
+    let staged = staging.path().join("pack");
+    copy_pack(&source_pack, &staged)?;
+    Pack::load(&staged)?;
+    reject_existing(&destination)?;
+    fs::rename(&staged, &destination).map_err(|source| Error::WriteFile {
+        path: destination.clone(),
+        source,
+    })?;
     summary(destination)
 }
 
@@ -737,13 +751,15 @@ pub fn import_folder(
         .into_iter()
         .map(|event| (event.as_str().to_owned(), Vec::new()))
         .collect();
+    let mut copied_bytes = 0;
     for (event, filename, path) in clips.values() {
         let relative = format!("audio/{filename}");
         let target = root.join(&relative);
-        fs::copy(path, &target).map_err(|source| Error::WriteFile {
-            path: target,
-            source,
-        })?;
+        copied_bytes += copy_bounded(
+            path,
+            &target,
+            MAX_AUDIO_BYTES.min(MAX_PACK_BYTES - copied_bytes),
+        )?;
         events
             .get_mut(event.as_str())
             .expect("known event")
@@ -1098,44 +1114,77 @@ pub(crate) fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn copy_pack(source: &Path, destination: &Path) -> Result<()> {
-    copy_directory(source, destination)
-}
-
-fn copy_directory(source: &Path, destination: &Path) -> Result<()> {
-    fs::create_dir_all(destination).map_err(|source_error| Error::WriteFile {
+fn copy_pack(source: &Pack, destination: &Path) -> Result<()> {
+    fs::create_dir(destination).map_err(|source_error| Error::WriteFile {
         path: destination.to_path_buf(),
         source: source_error,
     })?;
-    for entry in fs::read_dir(source).map_err(|source_error| Error::ReadFile {
-        path: source.to_path_buf(),
-        source: source_error,
-    })? {
-        let entry = entry.map_err(|source_error| Error::ReadFile {
-            path: source.to_path_buf(),
-            source: source_error,
-        })?;
-        let file_type = entry.file_type().map_err(|source_error| Error::ReadFile {
-            path: entry.path(),
-            source: source_error,
-        })?;
-        let target = destination.join(entry.file_name());
-        if file_type.is_symlink() {
-            return Err(Error::Pack(format!(
-                "pack contains an unsafe symlink: {}",
-                entry.path().display()
-            )));
+    write_manifest(destination, &source.manifest)?;
+    let files: BTreeSet<_> = source.manifest.events.values().flatten().collect();
+    let mut copied_bytes = 0;
+    for relative in files {
+        let target = destination.join(relative);
+        // Aliases such as audio/./clip.wav can refer to an already copied file.
+        if target.is_file() {
+            continue;
         }
-        if file_type.is_dir() {
-            copy_directory(&entry.path(), &target)?;
-        } else if file_type.is_file() {
-            fs::copy(entry.path(), &target).map_err(|source_error| Error::WriteFile {
-                path: target,
-                source: source_error,
-            })?;
-        }
+        fs::create_dir_all(target.parent().expect("audio parent")).map_err(|source| {
+            Error::WriteFile {
+                path: target.clone(),
+                source,
+            }
+        })?;
+        copied_bytes += copy_bounded(
+            &source.root.join(relative),
+            &target,
+            MAX_AUDIO_BYTES.min(MAX_PACK_BYTES - copied_bytes),
+        )?;
+    }
+    let readme = source.root.join("README.md");
+    if fs::symlink_metadata(&readme).is_ok() {
+        copy_bounded(&readme, &destination.join("README.md"), MAX_MANIFEST_BYTES)?;
     }
     Ok(())
+}
+
+pub(crate) fn copy_bounded(source: &Path, destination: &Path, limit: u64) -> Result<u64> {
+    let metadata = fs::symlink_metadata(source).map_err(|error| Error::ReadFile {
+        path: source.to_path_buf(),
+        source: error,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::Pack(
+            "refusing to copy a symlink or nonregular pack file".to_owned(),
+        ));
+    }
+    let input = fs::File::open(source).map_err(|error| Error::ReadFile {
+        path: source.to_path_buf(),
+        source: error,
+    })?;
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut output = options
+        .open(destination)
+        .map_err(|source| Error::WriteFile {
+            path: destination.to_path_buf(),
+            source,
+        })?;
+    let copied =
+        io::copy(&mut input.take(limit + 1), &mut output).map_err(|source| Error::WriteFile {
+            path: destination.to_path_buf(),
+            source,
+        })?;
+    if copied > limit {
+        return Err(Error::Pack(
+            "pack file grew beyond its size limit during copying".to_owned(),
+        ));
+    }
+    Ok(copied)
 }
 
 pub(crate) fn write_manifest(root: &Path, manifest: &PackManifest) -> Result<()> {
@@ -1287,6 +1336,40 @@ mod tests {
         let bad = manifest("audio/commit.exe");
         fs::write(&manifest_path, toml::to_string(&bad).expect("manifest")).expect("manifest");
         assert!(validate(directory.path()).is_err());
+    }
+
+    #[test]
+    fn pack_install_copies_only_data_and_rolls_back_a_failed_import() {
+        let directory = tempfile::tempdir().expect("temp");
+        let source = directory.path().join("source");
+        fs::create_dir_all(source.join("audio")).expect("source");
+        fs::write(source.join("audio/commit.wav"), b"RIFF").expect("audio");
+        fs::write(
+            source.join("pack.toml"),
+            toml::to_string(&manifest("audio/commit.wav")).expect("manifest"),
+        )
+        .expect("write");
+        fs::write(source.join("README.md"), "Pack notes").expect("readme");
+        fs::write(source.join("payload.exe"), "must not be installed").expect("extra");
+        fs::create_dir_all(source.join(".git")).expect("git metadata");
+        let paths = AppPaths::from_root(directory.path().join("home"));
+        let readme = fs::OpenOptions::new()
+            .write(true)
+            .open(source.join("README.md"))
+            .expect("readme");
+        readme
+            .set_len(super::MAX_MANIFEST_BYTES + 1)
+            .expect("oversized readme");
+        assert!(super::install(&paths, &source).is_err());
+        assert!(!paths.packs.join("sample").exists());
+        assert_eq!(fs::read_dir(&paths.packs).expect("packs").count(), 0);
+        fs::write(source.join("README.md"), "Pack notes").expect("readme");
+        super::install(&paths, &source).expect("install");
+        let installed = paths.packs.join("sample");
+        assert!(installed.join("audio/commit.wav").exists());
+        assert!(installed.join("README.md").exists());
+        assert!(!installed.join("payload.exe").exists());
+        assert!(!installed.join(".git").exists());
     }
 
     #[test]

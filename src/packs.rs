@@ -617,6 +617,7 @@ pub fn import_folder(
             Error::Pack("provide a nonempty pack name: gitsama pack scaffold <name>".to_owned())
         })?
         .trim();
+    validate_display_text("pack name", name, false)?;
     let id = slugify(name);
     validate_id(&id)?;
     if is_built_in(&id) {
@@ -678,6 +679,7 @@ pub fn import_folder(
                 .file_name()
                 .into_string()
                 .map_err(|_| Error::Pack("audio filenames must be UTF-8".to_owned()))?;
+            validate_display_text("audio filename", &filename, false)?;
             let Some(event) = event_from_filename(&path) else {
                 unmatched.push(filename);
                 continue;
@@ -787,6 +789,7 @@ fn event_from_filename(path: &Path) -> Option<EventKind> {
 }
 
 pub fn scaffold(name: &str, parent: impl AsRef<Path>) -> Result<PathBuf> {
+    validate_display_text("pack name", name, false)?;
     if name.trim().is_empty() {
         return Err(Error::Pack("pack name cannot be empty".to_owned()));
     }
@@ -887,6 +890,7 @@ fn validate_manifest(manifest: &PackManifest) -> Result<()> {
         if field.1.trim().is_empty() {
             return Err(Error::Pack(format!("{} cannot be empty", field.0)));
         }
+        validate_display_text(field.0, field.1, field.0 == "description")?;
     }
     for event in manifest.events.keys() {
         let parsed = EventKind::parse(event)?;
@@ -900,7 +904,20 @@ fn validate_manifest(manifest: &PackManifest) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn validate_display_text(label: &str, value: &str, multiline: bool) -> Result<()> {
+    if value.chars().any(|ch| {
+        (ch.is_control() && !(multiline && matches!(ch, '\n' | '\r' | '\t')))
+            || matches!(ch, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    }) {
+        return Err(Error::Pack(format!(
+            "{label} contains unsafe display control characters"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_id(id: &str) -> Result<()> {
+    validate_display_text("pack id", id, false)?;
     if !is_valid_id(id) {
         return Err(Error::Pack(format!(
             "id '{id}' must be 1-64 lowercase letters, digits, '-' or '_', cannot start with '-', and cannot be a reserved Windows device name; choose a different pack name"
@@ -993,6 +1010,7 @@ fn validate_audio_files(root: &Path, manifest: &PackManifest) -> Result<()> {
 }
 
 fn safe_relative_path(value: &str) -> Result<PathBuf> {
+    validate_display_text("audio path", value, false)?;
     let path = Path::new(value);
     if value.trim().is_empty() || path.is_absolute() {
         return Err(Error::Pack(format!("audio path must be relative: {value}")));
@@ -1134,6 +1152,19 @@ mod tests {
         value.events.remove("branch-create");
         value.schema_version = PACK_SCHEMA_VERSION + 1;
         assert!(validate_manifest(&value).is_err());
+    }
+
+    #[test]
+    fn rejects_terminal_controls_but_keeps_unicode_and_multiline_descriptions() {
+        let mut value = manifest("audio/commit.wav");
+        value.name = "Naruto 日本語 ⚔️".to_owned();
+        value.description = "First line\nSecond line\twith details".to_owned();
+        assert!(validate_manifest(&value).is_ok());
+        for name in ["Fake\u{1b}[2J", "Fake\u{7}", "Fake\u{202e}txt"] {
+            value.name = name.to_owned();
+            assert!(validate_manifest(&value).is_err());
+        }
+        assert!(safe_relative_path("audio/commit\u{1b}.wav").is_err());
     }
 
     #[test]

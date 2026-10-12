@@ -114,6 +114,9 @@ fn submit_with(
         return Ok(url.clone());
     }
     let pack = checked_pack(paths, id)?;
+    packs::validate_display_text("author", &metadata.author, false)?;
+    packs::validate_display_text("license", &metadata.license, false)?;
+    packs::validate_display_text("source", &metadata.source, true)?;
     if metadata.author.trim().is_empty()
         || metadata.author.trim().eq_ignore_ascii_case("Your Name")
         || metadata.license.trim().is_empty()

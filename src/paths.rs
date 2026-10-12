@@ -45,6 +45,16 @@ impl AppPaths {
                 path: directory.to_path_buf(),
                 source,
             })?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).map_err(
+                    |source| Error::WriteFile {
+                        path: directory.to_path_buf(),
+                        source,
+                    },
+                )?;
+            }
         }
         Ok(())
     }

@@ -207,7 +207,10 @@ fn run_inner(native_event: &str, args: &[String]) -> Result<()> {
     let job_info = platform::current_job_info();
     logging::write(
         &paths,
-        &format!("pid={pid} hook entered: {native_event} args={args:?} [{job_info}]"),
+        &format!(
+            "pid={pid} hook entered: {native_event} argument_count={} [{job_info}]",
+            args.len()
+        ),
     );
     let config = Config::load_or_default(&paths);
     let pulling = env::var("GIT_REFLOG_ACTION")

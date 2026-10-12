@@ -305,6 +305,26 @@ fn ci_has_supported_git_for_configured_hooks() {
 }
 
 #[test]
+fn hook_logs_never_include_remote_credentials() {
+    let sandbox = Sandbox::new();
+    let secret = "GITSAMA_SYNTHETIC_SECRET";
+    let output = sandbox.tool(
+        None,
+        &[
+            "hook",
+            "pre-push",
+            "origin",
+            &format!("https://audit:{secret}@example.invalid/repo.git"),
+        ],
+    );
+    assert!(output.status.success());
+    let log = fs::read_to_string(sandbox.home.join("logs/gitsama.log")).expect("diagnostic log");
+    assert!(log.contains("hook entered: pre-push"));
+    assert!(!log.contains(secret));
+    assert!(!log.contains("example.invalid"));
+}
+
+#[test]
 fn commit_hook_dispatches_one_event() {
     if skip_if_unsupported() {
         return;

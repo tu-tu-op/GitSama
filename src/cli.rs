@@ -604,10 +604,11 @@ fn pack_command(command: PackCommand) -> Result<()> {
                 let count = pack.files_for(event).len();
                 if count > 0 {
                     println!("  {}: {} clip(s)", event.label(), count);
-                } else if event == EventKind::MassivePush
-                    && !pack.files_for(EventKind::Push).is_empty()
+                } else if let Some(fallback) = event
+                    .fallback()
+                    .filter(|fallback| !pack.files_for(*fallback).is_empty())
                 {
-                    println!("  {}: falls back to Push", event.label());
+                    println!("  {}: falls back to {}", event.label(), fallback.label());
                 } else {
                     println!("  {}: no sound", event.label());
                 }

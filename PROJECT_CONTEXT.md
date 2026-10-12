@@ -8,7 +8,7 @@
 ## 1. Executive Summary
 
 - **What it is**: Zero-daemon Rust CLI tool playing local audio reactions (sound packs) to Git actions, with an explicit GitHub pack-contribution command.
-- **What it does**: Intercepts 6 native Git hooks, detects 8 workflow events (commit, push, massive push, merge, branch switch/create/delete, rebase), and plays audio without blocking Git.
+- **What it does**: Intercepts 6 native Git hooks, detects 9 workflow events (commit, push, massive push, merge, branch switch/create/delete, rebase, pull), and plays audio without blocking Git.
 - **How it does it**: Uses Git 2.54+ user-level configured hooks (`hook.*`), detached worker processes (`__play`), an atomic filesystem directory lock (`PlaybackLock`), and a stateful debounce machine to eliminate hook duplicate events.
 
 ---
@@ -34,14 +34,14 @@
 c:\Projects\GitSama\
 ├── Cargo.toml / Cargo.lock      # Build config; release profile: LTO=true, strip=true, codegen-units=1
 ├── install.ps1 / install.sh     # User installer (checks Git >=2.54, builds/copies binary, runs setup)
-├── packs/naruto/                # Bundled default sound pack (pack.toml + 8 MP3s embedded in binary)
+├── packs/                       # Naruto, Bleach, Ravi Kishan (manifests + 26 MP3s embedded in binary)
 ├── docs/                        # Architecture, troubleshooting, pack docs
 ├── tests/git_integration.rs     # Integration test suite driving real Git processes
 └── src/
     ├── main.rs                  # Entrypoint: catch_unwind wrapper around cli::run; exits 0 or 1
     ├── cli.rs                   # Clap definitions: public commands + hidden hook worker entrypoints
     ├── hooks.rs                 # Git hook registration, shell quoting, event dispatch & debounce logic
-    ├── events.rs                # EventKind enum (8 variants) & string parsers
+    ├── events.rs                # EventKind enum (9 variants) & string parsers
     ├── audio.rs                 # Detached playback spawn, rodio pipeline, atomic cross-process lock
     ├── push.rs                  # Pre-push stdin parser + local rev-list commit counter (zero network)
     ├── state.rs                 # ~/.gitsama/state file management (atomic claims for pending branches)
@@ -84,8 +84,10 @@ flowchart TD
 | `pre-push` | Remote name + URL (args), ref list on `stdin` | Parses stdin; runs local `git rev-list <local> --not <remote>` | `push` or `massive_push` (if count ≥ threshold) |
 | `post-merge` | Is squash flag (`0`/`1`) | Direct dispatch | `merge` |
 | `post-checkout` | Old HEAD, new HEAD, flag (`1`=branch, `0`=file) | Ignored if file checkout or clone init; checks pending branch state | `branch_switch` (or completes `branch_create`) |
-| `reference-transaction` | State (`committed`), ref lines on `stdin` | Detects `0000..` -> OID (create) or OID -> `0000..` (delete) | `branch_create` (staged) or `branch_delete` |
+| `reference-transaction` | State (`committed`), ref lines on `stdin` | Detects creation/deletion; during pull, dispatches only on a change to the current branch | `branch_create` (staged), `branch_delete`, or `pull` |
 | `post-rewrite` | Command name (`rebase` / `amend`) | Dispatches only if arg is `rebase` | `rebase` |
+
+`GIT_REFLOG_ACTION` identifies pull operations. During a pull, the other native hooks are silent. Rebase's saved `head-name` identifies the original branch while HEAD is detached, so only the final branch update plays Pull. Packs without a Pull mapping use their Merge clip; Pull retains its own enable setting.
 
 ---
 

@@ -13,21 +13,21 @@ Keep these values aligned:
 - The package version in `Cargo.toml` and the `gitsama` entry in `Cargo.lock`.
 - The version in `npm/package.json`.
 - The default version in `install.ps1` and `install.sh`.
-- The release tag, such as `v0.1.1`.
+- The release tag, such as `v0.1.2`.
 
 Update `CHANGELOG.md` and review the Windows, Linux, and macOS CI results before
 merging. The workflow rejects a tag whose commit is not merged into `main` or
 whose version does not match the package and installer versions.
 
-## Publish 0.1.1
+## Publish 0.1.2
 
 After the release branch has been merged, run from the repository:
 
 ```powershell
 git switch main
 git pull --ff-only origin main
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 Watch the **Release** workflow in GitHub Actions. Wait for **Publish GitHub
@@ -46,7 +46,7 @@ npm view gitsama version --registry=https://registry.npmjs.org
 ```
 
 Complete any npm authentication prompts in the browser. The final command should
-show `0.1.1`. Announce the update after both GitHub and npm publication are complete.
+show `0.1.2`. Announce the update after both GitHub and npm publication are complete.
 
 Users running 0.1.0 need one update through npm or their source installer to get
 the upgrade command. Later versions can use `gitsama --upgrade` or accept the

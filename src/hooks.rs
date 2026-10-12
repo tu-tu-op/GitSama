@@ -210,6 +210,14 @@ fn run_inner(native_event: &str, args: &[String]) -> Result<()> {
         &format!("pid={pid} hook entered: {native_event} args={args:?} [{job_info}]"),
     );
     let config = Config::load_or_default(&paths);
+    let pulling = env::var("GIT_REFLOG_ACTION")
+        .ok()
+        .is_some_and(|action| action.split_whitespace().next() == Some("pull"));
+    // Pull's branch update is the sole sound source for the whole operation.
+    // Its internal commit, merge, checkout and rewrite hooks stay silent.
+    if pulling && native_event != "reference-transaction" {
+        return Ok(());
+    }
     match native_event {
         "post-commit" => dispatch(
             &paths,
@@ -225,7 +233,7 @@ fn run_inner(native_event: &str, args: &[String]) -> Result<()> {
         ),
         "pre-push" => handle_push(&paths, &config, args),
         "post-checkout" => handle_checkout(&paths, &config, args),
-        "reference-transaction" => handle_transaction(&paths, &config, args),
+        "reference-transaction" => handle_transaction(&paths, &config, args, pulling),
         "post-rewrite" => {
             if args.first().is_some_and(|value| value == "rebase") {
                 dispatch(
@@ -330,7 +338,12 @@ fn handle_checkout(paths: &AppPaths, config: &Config, args: &[String]) -> Result
     )
 }
 
-fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Result<()> {
+fn handle_transaction(
+    paths: &AppPaths,
+    config: &Config,
+    args: &[String],
+    pulling: bool,
+) -> Result<()> {
     if args.first().map(String::as_str) != Some("committed") {
         return Ok(());
     }
@@ -343,6 +356,9 @@ fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Res
         .any(|line| parse_transaction_line(line).is_some())
     {
         return Ok(());
+    }
+    if pulling {
+        return handle_pull_update(paths, config, &input);
     }
     let repository = branch_operation_identity()?;
     // A first commit materializes the unborn HEAD branch. Git reports it as
@@ -395,6 +411,46 @@ fn handle_transaction(paths: &AppPaths, config: &Config, args: &[String]) -> Res
                 },
             )?;
         }
+    }
+    Ok(())
+}
+
+fn handle_pull_update(paths: &AppPaths, config: &Config, input: &str) -> Result<()> {
+    let reference = git::checked(["symbolic-ref", "--quiet", "HEAD"])
+        .ok()
+        .map(|branch| branch.trim().to_owned())
+        .filter(|branch| branch.starts_with("refs/heads/"))
+        .or_else(|| {
+            // Rebase temporarily detaches HEAD. Its saved branch identifies
+            // the final branch update; intermediate detached HEAD moves and
+            // remote-tracking ref updates must not play Pull.
+            let directory = git::git_dir().ok()?;
+            ["rebase-merge", "rebase-apply"]
+                .into_iter()
+                .find_map(|state| {
+                    let branch =
+                        std::fs::read_to_string(directory.join(state).join("head-name")).ok()?;
+                    let branch = branch.trim();
+                    branch.starts_with("refs/heads/").then(|| branch.to_owned())
+                })
+        });
+    let Some(reference) = reference else {
+        return Ok(());
+    };
+    if input.lines().any(|line| {
+        parse_transaction_line(line).is_some_and(|(old, new, updated)| {
+            updated == reference && old != new && !git::is_zero_oid(new)
+        })
+    }) {
+        dispatch(
+            paths,
+            config,
+            EventKind::Pull,
+            DispatchDetails {
+                branch: Some(reference.trim_start_matches("refs/heads/").to_owned()),
+                commit_count: None,
+            },
+        )?;
     }
     Ok(())
 }

@@ -89,6 +89,7 @@ impl Sandbox {
             .env("GIT_CONFIG_COUNT", "0")
             .env_remove("GIT_CONFIG_PARAMETERS")
             .env_remove("GIT_CONFIG")
+            .env_remove("GIT_REFLOG_ACTION")
             .env_remove("GIT_DIR")
             .env_remove("GIT_COMMON_DIR")
             .env_remove("GIT_WORK_TREE")
@@ -200,6 +201,23 @@ impl Sandbox {
         fs::write(repo.join(file), contents).expect("write fixture file");
         self.git_ok(Some(repo), &["add", file]);
         self.commit(repo, file);
+    }
+
+    fn pull_pair(&self, name: &str) -> (PathBuf, PathBuf) {
+        let source = self.init_repo(&format!("{name}-source"));
+        self.tool_ok(Some(&source), &["off-here"]);
+        self.commit_file(&source, "base.txt", "base\n");
+        let client = self._directory.path().join(format!("{name}-client"));
+        self.git_ok(
+            None,
+            &[
+                "clone",
+                "--quiet",
+                source.to_str().expect("source path"),
+                client.to_str().expect("client path"),
+            ],
+        );
+        (source, client)
     }
 
     fn clear_log(&self) {
@@ -411,6 +429,125 @@ fn merge_and_failed_merge_behave_correctly() {
     assert!(String::from_utf8_lossy(&unmerged.stdout).contains("conflict.txt"));
     assert!(!sandbox.event_names().contains(&"merge".to_owned()));
     sandbox.git_ok(Some(&repo), &["merge", "--abort"]);
+}
+
+#[test]
+fn pull_plays_once_only_when_the_checked_out_branch_changes() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    for (name, strategy, diverge) in [
+        ("fast-forward", "--ff-only", false),
+        ("merge", "--no-rebase", true),
+        ("rebase-fast-forward", "--rebase", false),
+        ("rebase", "--rebase", true),
+    ] {
+        let (source, client) = sandbox.pull_pair(name);
+        if name == "fast-forward" {
+            // The full branch ref must work even when a tag has the same name.
+            sandbox.git_ok(Some(&client), &["tag", "main"]);
+        }
+        if diverge {
+            sandbox.commit_file(&client, "local-1.txt", "local 1\n");
+            sandbox.commit_file(&client, "local-2.txt", "local 2\n");
+        }
+        sandbox.commit_file(&source, "remote.txt", "remote\n");
+        sandbox.clear_log();
+        sandbox.git_ok(Some(&client), &["pull", strategy]);
+        assert_eq!(sandbox.wait_for_events(1), vec!["pull"], "{name}");
+        assert_eq!(
+            fs::read_to_string(client.join("remote.txt")).unwrap(),
+            "remote\n"
+        );
+        assert_eq!(sandbox.records()[0]["branch"].as_str(), Some("main"));
+
+        sandbox.clear_log();
+        sandbox.git_ok(Some(&client), &["pull", strategy]);
+        assert!(sandbox.wait_for_events(0).is_empty(), "up-to-date {name}");
+    }
+}
+
+#[test]
+fn pull_failures_and_remote_tracking_updates_stay_silent() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let (source, client) = sandbox.pull_pair("failed-pull");
+    sandbox.commit_file(&client, "conflict.txt", "local\n");
+    sandbox.commit_file(&source, "conflict.txt", "remote\n");
+    let head = sandbox
+        .git_ok(Some(&client), &["rev-parse", "refs/heads/main"])
+        .stdout;
+
+    for strategy in ["--ff-only", "--no-rebase", "--rebase"] {
+        sandbox.clear_log();
+        let failed = sandbox.git(Some(&client), &["pull", strategy]);
+        assert!(!failed.status.success(), "{strategy}");
+        assert!(sandbox.wait_for_events(0).is_empty(), "{strategy}");
+        assert_eq!(
+            sandbox
+                .git_ok(Some(&client), &["rev-parse", "refs/heads/main"])
+                .stdout,
+            head
+        );
+        match strategy {
+            "--no-rebase" => {
+                sandbox.git_ok(Some(&client), &["merge", "--abort"]);
+            }
+            "--rebase" => {
+                sandbox.git_ok(Some(&client), &["rebase", "--abort"]);
+            }
+            _ => {}
+        }
+    }
+
+    sandbox.commit_file(&source, "another-remote.txt", "remote\n");
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&client), &["pull", "--dry-run"]);
+    assert!(sandbox.wait_for_events(0).is_empty());
+    sandbox.git_ok(Some(&client), &["fetch", "origin"]);
+    assert!(sandbox.wait_for_events(0).is_empty());
+}
+
+#[test]
+fn pull_controls_and_legacy_pack_fallback_are_independent() {
+    if skip_if_unsupported() {
+        return;
+    }
+    let sandbox = Sandbox::new();
+    sandbox.setup();
+    let (source, client) = sandbox.pull_pair("pull-controls");
+    let manifest = sandbox.home.join("packs/naruto/pack.toml");
+    let text = fs::read_to_string(&manifest).expect("manifest");
+    let mut legacy: toml::Value = toml::from_str(&text).expect("manifest TOML");
+    legacy["events"]
+        .as_table_mut()
+        .expect("events")
+        .remove("pull");
+    fs::write(&manifest, toml::to_string_pretty(&legacy).unwrap()).expect("legacy pack");
+    for event in ["merge", "rebase", "commit"] {
+        sandbox.tool_ok(None, &["disable", event]);
+    }
+    let preview = sandbox.tool_ok(None, &["test", "pull"]);
+    assert!(String::from_utf8_lossy(&preview.stdout).contains("fallback to Merge"));
+    sandbox.commit_file(&source, "remote.txt", "remote\n");
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&client), &["pull", "--ff-only"]);
+    assert_eq!(sandbox.wait_for_events(1), vec!["pull"]);
+
+    sandbox.tool_ok(None, &["disable", "pull"]);
+    sandbox.commit_file(&source, "remote.txt", "new remote\n");
+    sandbox.clear_log();
+    sandbox.git_ok(Some(&client), &["pull", "--ff-only"]);
+    assert!(sandbox.wait_for_events(0).is_empty());
+    assert_eq!(
+        fs::read_to_string(client.join("remote.txt")).unwrap(),
+        "new remote\n"
+    );
 }
 
 #[test]
@@ -722,7 +859,7 @@ fn scaffold_installs_and_selects_clips_from_the_current_folder() {
     let sandbox = Sandbox::new();
     sandbox.tool_ok(None, &["test", "commit"]);
     sandbox.clear_log();
-    let source = sandbox._directory.path().join("Bleach");
+    let source = sandbox._directory.path().join("Bleach Custom");
     fs::create_dir_all(source.join("audio")).expect("source");
     fs::create_dir(source.join(".git")).expect("unrelated history");
     let tone = sandbox.home.join("packs/starter/audio/commit.wav");
@@ -736,18 +873,18 @@ fn scaffold_installs_and_selects_clips_from_the_current_folder() {
         String::from_utf8_lossy(&output.stderr)
     );
     let text = String::from_utf8_lossy(&output.stdout);
-    assert!(text.contains("Using Bleach (bleach)"));
+    assert!(text.contains("Using Bleach Custom (bleach-custom)"));
     assert!(text.contains("falls back to Push"));
     assert!(text.contains("Merge: no sound"));
     assert!(text.contains("gitsama test all"));
-    let installed = sandbox.home.join("packs/bleach");
+    let installed = sandbox.home.join("packs/bleach-custom");
     assert!(installed.join("audio/commit.wav").exists());
     assert!(installed.join("audio/push.wav").exists());
     assert!(!installed.join("private.txt").exists());
     assert!(!installed.join(".git").exists());
     assert!(!source.join("pack.toml").exists());
     let config = fs::read_to_string(sandbox.home.join("config.toml")).expect("config");
-    assert!(config.contains("active_pack = \"bleach\""));
+    assert!(config.contains("active_pack = \"bleach-custom\""));
     sandbox.tool_ok(
         None,
         &["pack", "validate", installed.to_str().expect("path")],
@@ -916,6 +1053,10 @@ fn delete_any_pack_preserves_sources_and_remembers_builtin_deletions() {
     assert!(source.join("commit.wav").exists());
     sandbox.tool_ok(None, &["pack", "remove", "starter"]);
     assert!(!sandbox.home.join("packs/starter").exists());
+    for id in ["bleach", "ravi-kishan"] {
+        sandbox.tool_ok(None, &["pack", "delete", id]);
+        assert!(!sandbox.home.join(format!("packs/{id}")).exists());
+    }
     let last = sandbox.tool_ok(None, &["pack", "delete", "naruto"]);
     assert!(
         String::from_utf8_lossy(&last.stdout).contains("No voice packs remain; playback muted")
@@ -931,7 +1072,7 @@ fn delete_any_pack_preserves_sources_and_remembers_builtin_deletions() {
             .as_array()
             .expect("removed")
             .len(),
-        2
+        4
     );
     let list = sandbox.tool_ok(None, &["pack", "list"]);
     assert!(String::from_utf8_lossy(&list.stdout).trim().is_empty());
@@ -944,6 +1085,8 @@ fn delete_any_pack_preserves_sources_and_remembers_builtin_deletions() {
     sandbox.tool_ok(None, &["setup"]);
     assert!(!sandbox.home.join("packs/naruto").exists());
     assert!(!sandbox.home.join("packs/starter").exists());
+    assert!(!sandbox.home.join("packs/bleach").exists());
+    assert!(!sandbox.home.join("packs/ravi-kishan").exists());
     sandbox.tool_ok(None, &["use", "naruto"]);
     assert!(sandbox.home.join("packs/naruto/pack.toml").exists());
     assert!(!sandbox.home.join("packs/starter").exists());
@@ -959,6 +1102,13 @@ fn delete_any_pack_preserves_sources_and_remembers_builtin_deletions() {
     sandbox.tool_ok(None, &["use", "starter"]);
     assert!(sandbox.home.join("packs/starter/pack.toml").exists());
     assert!(!sandbox.home.join("packs/naruto").exists());
+    for id in ["bleach", "ravi-kishan"] {
+        sandbox.tool_ok(None, &["use", id]);
+        assert!(sandbox.home.join(format!("packs/{id}/pack.toml")).exists());
+        assert_eq!(config()["active_pack"].as_str(), Some(id));
+        sandbox.tool_ok(None, &["pack", "delete", id]);
+        assert!(!sandbox.home.join(format!("packs/{id}")).exists());
+    }
 }
 
 #[test]

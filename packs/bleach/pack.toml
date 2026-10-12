@@ -1,0 +1,17 @@
+schema_version = 1
+id = "bleach"
+name = "Bleach"
+author = "Your Name"
+version = "1.0.0"
+description = "A GitSama sound pack."
+license = "user-provided"
+
+[events]
+branch_create = ["audio/branch-create.mp3"]
+branch_delete = ["audio/branch-delete.mp3"]
+branch_switch = ["audio/branch-switch.mp3"]
+commit = ["audio/Commit.mp3"]
+massive_push = ["audio/massive-push.mp3"]
+merge = ["audio/merge.mp3"]
+push = ["audio/push.mp3"]
+rebase = ["audio/rebase.mp3"]

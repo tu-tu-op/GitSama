@@ -16,4 +16,5 @@ branch_switch = []
 branch_create = []
 branch_delete = []
 rebase = []
+pull = []
 

@@ -2,7 +2,7 @@
 
 A GitSama pack is a data-only directory. It contains a manifest and audio files; no manifest value is executed.
 
-Fresh installations include the generated Starter pack and the bundled Naruto Voice Pack. The bundled pack is materialized into the user's GitSama data directory on first setup and is selected by default; custom packs remain supported through the normal import commands.
+Fresh installations include the bundled Naruto, Bleach, and Ravi Kishan voice packs plus generated Starter tones. The bundled packs are materialized into the user's GitSama data directory on first setup. Naruto is selected by default; custom packs remain supported through the normal import commands.
 
 ## Directory layout
 
@@ -43,17 +43,20 @@ branch_create = ["audio/branch-create.wav"]
 branch_delete = ["audio/branch-delete.wav"]
 branch_switch = ["audio/branch-switch.wav"]
 rebase = ["audio/rebase.wav"]
+pull = ["audio/pull.wav"]
 ```
 
-The required metadata fields are schema_version, id, name, author, version, description, and license. Event keys are exactly commit, push, massive_push, merge, branch_switch, branch_create, branch_delete, and rebase. Every value is an array of relative paths.
+The required metadata fields are schema_version, id, name, author, version, description, and license. Event keys are exactly commit, push, massive_push, merge, branch_switch, branch_create, branch_delete, rebase, and pull. Every value is an array of relative paths.
 
-Pack IDs contain 1-64 lowercase letters, digits, hyphens, and underscores, and cannot start with a hyphen. Windows device names such as `con`, `nul`, `com1`, and `lpt1` are reserved on all platforms. `starter` and `naruto` are reserved for built-in packs during folder imports. An ID is the installed directory name; commands such as `gitsama use` take this lowercase ID. Event paths may contain directories but must stay inside the pack root.
+Pack IDs contain 1-64 lowercase letters, digits, hyphens, and underscores, and cannot start with a hyphen. Windows device names such as `con`, `nul`, `com1`, and `lpt1` are reserved on all platforms. `starter`, `naruto`, `bleach`, and `ravi-kishan` are reserved for built-in packs during folder imports. An ID is the installed directory name; commands such as `gitsama use` take this lowercase ID. Event paths may contain directories but must stay inside the pack root.
 
 ## Audio
 
 GitSama decodes WAV, MP3, OGG, and FLAC with its built-in Rust audio stack. A file must exist, have one of those extensions, and be a regular file. The pack validator checks mappings and files; previews additionally open the audio decoder and play the selected clip. The pack validator rejects absolute paths, parent traversal, unsafe symlinks, and files outside the pack directory.
 
 Several files can be listed for one event. GitSama chooses one at random for each event. An event with no mapping is silent. If massive_push has no usable mapping but push does, massive_push falls back to push. This also applies when massive_push is disabled while push remains enabled.
+
+If pull has no mapping but merge does, Pull uses a Merge clip. This keeps older packs usable without changing their manifests. Pull has its own enable switch: disabling Pull silences pulls, and disabling Merge does not silence an enabled Pull event. Naruto and Ravi Kishan have dedicated Pull clips; Bleach uses Merge fallback. Pull plays only when the current branch changes during a pull, with the other internal hook sounds suppressed.
 
 The Starter pack is generated from simple PCM tones on first setup. It contains no anime media and exists for installation checks, development, and CI. The bundled Naruto Voice Pack is included with permission to redistribute its audio and covers all v1 events.
 
@@ -62,7 +65,7 @@ The Starter pack is generated from simple PCM tones on first setup. It contains 
 Open a terminal inside a folder containing renamed clips:
 
 ```sh
-cd Bleach
+cd "Bleach Custom"
 gitsama pack scaffold
 gitsama test all
 ```
@@ -81,8 +84,9 @@ Discovery checks the current folder and its direct `audio/` subfolder. Other fil
 | Branch Create | `branch-create.ogg`, `branch_create-1.mp3` |
 | Branch Delete | `branch-delete.wav`, `branch_delete_1.flac` |
 | Rebase | `rebase.mp3`, `rebase-3.wav` |
+| Pull | `pull.mp3`, `pull-2.wav` |
 
-Extensions and event names are case insensitive. Numeric suffixes must be positive integers. Multiple variants map to the same event and playback chooses one at random. A folder needs at least one mapped event; empty event arrays remain silent, with massive push falling back to push.
+Extensions and event names are case insensitive. Numeric suffixes must be positive integers. Multiple variants map to the same event and playback chooses one at random. A folder needs at least one mapped event; empty event arrays remain silent, with massive push falling back to push and Pull falling back to Merge.
 
 Scaffolding stops before installation for unmatched supported audio filenames, case-insensitive basename collisions between folders, symlinks or nonregular audio files, reserved IDs, or an already installed ID. The error explains what to rename or fix. For example, rename `bankai.mp3` to `commit.mp3`, and distinguish two `commit.mp3` clips as `commit-1.mp3` and `commit-2.mp3`.
 
@@ -122,11 +126,11 @@ gitsama pack delete my-custom-pack
 
 The importer refuses to replace an existing pack. Remove the old pack explicitly before importing an updated copy.
 
-`pack delete <id>` and `pack remove <id>` delete any installed pack, including `naruto` and `starter`. The installed directory and local preview/contribution records are removed; the original source folder is preserved. Invalid IDs, paths outside the installed packs directory, and symlink pack roots are rejected. Broken packs can be deleted even if their manifest no longer validates.
+`pack delete <id>` and `pack remove <id>` delete any installed pack, including `naruto`, `bleach`, `ravi-kishan`, and `starter`. The installed directory and local preview/contribution records are removed; the original source folder is preserved. Invalid IDs, paths outside the installed packs directory, and symlink pack roots are rejected. Broken packs can be deleted even if their manifest no longer validates.
 
-Deleting the active pack selects a remaining valid pack, preferring Naruto, then Starter, then a custom pack. Deleting the last pack clears the active selection and mutes playback. Afterward, selecting or scaffolding a pack resumes playback.
+Deleting the active pack selects a remaining valid pack, preferring Naruto, then Starter, then another remaining pack. Deleting the last pack clears the active selection and mutes playback. Afterward, selecting or scaffolding a pack resumes playback.
 
-Deleted built-ins stay absent during `pack list`, `setup`, and `doctor --fix`. To restore one, run `gitsama use naruto` or `gitsama use starter`; this reinstalls and selects that built-in pack.
+Deleted built-ins stay absent during `pack list`, `setup`, and `doctor --fix`. To restore one, run `gitsama use <id>` with `naruto`, `bleach`, `ravi-kishan`, or `starter`; this reinstalls and selects that built-in pack.
 
 ## Preview and contribute
 

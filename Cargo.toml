@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
-dirs = "4.0.0"
+dirs = "7.0.0"
 rand = "0.10.0"
 rodio = "0.21.1"
 self-replace = "1.5.0"

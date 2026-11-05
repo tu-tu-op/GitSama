@@ -2,6 +2,8 @@
 
 Thanks for helping make GitSama useful and joyful.
 
+Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) when participating in the project.
+
 ## Development setup
 
 Install Rust stable and Git. Clone the repository, then run:

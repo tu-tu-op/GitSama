@@ -207,6 +207,7 @@ Interactive commands can check public GitHub releases for updates. Set `GITSAMA_
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | No sound, Git versions, IDEs, coding agents, and recovery. |
 | [Architecture](docs/ARCHITECTURE.md) | Hooks, event detection, playback, and data flow. |
 | [Contributing](CONTRIBUTING.md) | Development setup, checks, and pack submissions. |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Community standards, private reporting, and enforcement. |
 | [Changelog](CHANGELOG.md) | Changes between releases. |
 
 ## FAQ
